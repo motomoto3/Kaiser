@@ -1,0 +1,24 @@
+{
+  "name": "kaiser-live",
+  "version": "1.0.0",
+  "description": "Polymarket scanner bot for Eurovision 2026 pools",
+  "main": "bot.js",
+  "scripts": {
+    "start": "node bot.js",
+    "paper": "node paper-app.js",
+    "paper:once": "PAPER_ONCE=true node paper-app.js",
+    "paper:evening": "PAPER_AUTO_TICK=false PAPER_STARTUP_TICK=false PAPER_TRADE_SIZE_EUR=100 node paper-app.js"
+  },
+  "keywords": [
+    "polymarket",
+    "scanner",
+    "eurovision"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "@polymarket/clob-client": "^5.8.1",
+    "@walletconnect/sign-client": "^2.23.9",
+    "ethers": "^6.16.0",
+    "qrcode-terminal": "^0.12.0"
+  }
+}

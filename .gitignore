@@ -1,0 +1,21 @@
+# secrets & personal data
+.env
+positions.env
+
+# logs
+*.log
+
+# runtime cache
+cache/*.json
+!cache/.gitkeep
+
+# personal session data
+memory/
+.claude/
+
+# dependencies
+node_modules/
+
+# misc
+*.xlsx
+*.tar.gz

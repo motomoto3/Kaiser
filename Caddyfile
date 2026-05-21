@@ -1,0 +1,21 @@
+# Replace yourdomain.com with your actual domain.
+# Caddy obtains and renews a TLS cert automatically (requires ports 80+443 open).
+#
+# Install:  https://caddyserver.com/docs/install
+# Run:      caddy run --config Caddyfile
+#
+# For local HTTPS testing use: caddy run --config Caddyfile.local (see below)
+
+yourdomain.com {
+    reverse_proxy localhost:3001
+}
+
+# ── Local HTTPS testing (Caddyfile.local) ─────────────────────────────────────
+# Create a separate file named Caddyfile.local with:
+#
+#   localhost {
+#       tls internal
+#       reverse_proxy localhost:3001
+#   }
+#
+# Then run: caddy run --config Caddyfile.local
