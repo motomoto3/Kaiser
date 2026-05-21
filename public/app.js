@@ -37,30 +37,11 @@ function findPosition(label) {
   return positions.find(p => normLabel(p.tier) === key) || null;
 }
 
-function findOrders(marketId) {
-  return (window._lastData?.openOrders || []).filter(o => o.marketId === marketId);
-}
-
 function fmtUsd(v) {
   if (!Number.isFinite(v)) return "—";
   return (v >= 0 ? "$" : "-$") + Math.abs(v).toFixed(2);
 }
 
-function renderOrdersBadge(orders) {
-  if (!orders.length) return "—";
-  const buys  = orders.filter(o => o.side === "BUY");
-  const sells = orders.filter(o => o.side === "SELL");
-  const parts = [];
-  if (buys.length) {
-    const avgP = buys.reduce((s, o) => s + o.price, 0) / buys.length;
-    parts.push(`<span class="order-buy">↑${buys.length} @${(avgP*100).toFixed(0)}¢</span>`);
-  }
-  if (sells.length) {
-    const avgP = sells.reduce((s, o) => s + o.price, 0) / sells.length;
-    parts.push(`<span class="order-sell">↓${sells.length} @${(avgP*100).toFixed(0)}¢</span>`);
-  }
-  return parts.join(" ");
-}
 
 function makeSpark(bids, w = 72, h = 22) {
   if (!bids || bids.length === 0) return `<svg width="${w}" height="${h}" class="spark-svg"></svg>`;
@@ -723,10 +704,6 @@ function calcApplyOdds() {
   });
 }
 
-function calcAnchorId() {
-  const active = calc.rows.filter(r => r.included);
-  return active.length > 0 ? active[active.length - 1].id : null;
-}
 
 function renderCalcRows() {
   const tbody = document.getElementById("c-body");

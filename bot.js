@@ -67,11 +67,9 @@ const state = {
   pollInFlight: false,
   events: [],
   fetchedAt: null,
-  positions: [],
   openOrders: [],
 };
 
-const POSITIONS_FILE = path.join(process.cwd(), "positions.env");
 const HISTORY_DAYS   = 7;
 const HISTORY_SAMPLE = 80;
 const HISTORY_FILE   = path.join(process.cwd(), "cache", "price-history.json");
@@ -244,32 +242,6 @@ async function fetchEvent(slug) {
   return extractEvent(data[0]);
 }
 
-function loadPositions() {
-  try {
-    if (!fs.existsSync(POSITIONS_FILE)) return [];
-    const lines = fs.readFileSync(POSITIONS_FILE, "utf8").split(/\r?\n/);
-    const positions = [];
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith("#")) continue;
-      const eqIdx = trimmed.indexOf("=");
-      if (eqIdx === -1) continue;
-      const tier = trimmed.slice(0, eqIdx).trim();
-      const rest = trimmed.slice(eqIdx + 1).trim();
-      const colonIdx = rest.indexOf(":");
-      if (colonIdx === -1) continue;
-      const entry    = parseFloat(rest.slice(0, colonIdx).trim());
-      const invested = parseFloat(rest.slice(colonIdx + 1).trim());
-      if (!tier || !Number.isFinite(entry) || entry <= 0) continue;
-      if (!Number.isFinite(invested) || invested <= 0) continue;
-      positions.push({ tier, entry, invested });
-    }
-    return positions;
-  } catch (err) {
-    console.warn("[bot] Failed to load positions:", err.message);
-    return [];
-  }
-}
 
 function mapPositions(raw) {
   const list = Array.isArray(raw) ? raw : [];
@@ -508,9 +480,7 @@ function recordResolution(ev) {
       outcomes:      m.outcomes,
       outcomePrices: m.outcomePrices,
     })),
-    positions: state.positions.filter(p =>
-      ev.markets.some(m => m.label === p.tier)
-    ),
+    positions: [],
   });
   console.log(`[bot] Recorded resolution: ${ev.slug}`);
 }
@@ -661,7 +631,6 @@ function createServer() {
           pollSeconds: appConfig.pollSeconds,
           fetchCount:  state.fetchCount,
           priceHistory: downsampleHistory(),
-          positions:   state.positions,
           openOrders:  state.openOrders,
           resolved:    resolvedEvents,
           slugs:       appConfig.eventSlugs,
