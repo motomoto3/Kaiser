@@ -1451,7 +1451,7 @@ async function exploreScan() {
   statusEl.textContent = "Scanning…";
   resultsEl.innerHTML = "";
   try {
-    const res = await fetch(`/explore/scan?pattern=${encodeURIComponent(pattern)}&minTiers=6&maxPages=8`, { cache: "no-store" });
+    const res = await fetch(`/explore/scan?pattern=${encodeURIComponent(pattern)}&minTiers=5&maxPages=8`, { cache: "no-store" });
     if (!res.ok) { statusEl.textContent = "Scan failed."; return; }
     const results = await res.json();
     statusEl.textContent = results.length ? `${results.length} pools found` : "No matching pools found.";

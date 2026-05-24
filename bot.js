@@ -697,7 +697,7 @@ function createServer() {
 
       if (method === "GET" && pathname === "/explore/scan") {
         const qs = new URL(req.url, "http://localhost").searchParams;
-        const minTiers = Math.max(3, parseInt(qs.get("minTiers") || "6", 10));
+        const minTiers = Math.max(3, parseInt(qs.get("minTiers") || "5", 10));
         const pattern  = ["all","normal","extremes"].includes(qs.get("pattern")) ? qs.get("pattern") : "all";
         const maxPages = Math.min(12, Math.max(1, parseInt(qs.get("maxPages") || "8", 10)));
 
@@ -706,6 +706,8 @@ function createServer() {
           if (n < 3) return null;
           if (prices.every(p => Math.abs(p - prices[0]) < 0.005)) return null;
           if (prices.every(p => p < 0.01 || p > 0.99)) return null;
+          // At most 1 tier may be above 25¢ — filters out "pick the winner" style markets
+          if (prices.filter(p => p > 0.25).length > 1) return null;
           const maxP = Math.max(...prices);
           const maxIdx = prices.indexOf(maxP);
           const head = prices[0], tail = prices[n - 1];
@@ -715,11 +717,14 @@ function createServer() {
           return "other";
         }
 
+        const results = [];
         try {
-          const results = [];
           for (let page = 0; page < maxPages && results.length < 50; page++) {
             const url = `${appConfig.gammaBaseUrl}/events?limit=100&offset=${page * 100}&order=startDate&ascending=false`;
-            const batch = await fetchJsonWithTimeout(url, appConfig.requestTimeoutMs * 2);
+            let batch;
+            try {
+              batch = await fetchJsonWithTimeout(url, appConfig.requestTimeoutMs * 2);
+            } catch { break; } // page timed out — return what we have
             if (!Array.isArray(batch) || !batch.length) break;
             for (const ev of batch) {
               const markets = ev.markets || [];
@@ -744,11 +749,11 @@ function createServer() {
               });
             }
           }
-          results.sort((a, b) => a.sumP - b.sumP);
-          return sendJson(res, 200, results.slice(0, 50));
         } catch (err) {
-          return sendJson(res, 502, { error: err.message });
+          if (!results.length) return sendJson(res, 502, { error: err.message });
         }
+        results.sort((a, b) => a.sumP - b.sumP);
+        return sendJson(res, 200, results.slice(0, 50));
       }
 
       if (method === "GET" && pathname === "/explore") {
