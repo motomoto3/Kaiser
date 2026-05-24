@@ -1811,11 +1811,14 @@ let exploreCurrentAligned = null;
 let exploreCurrentMarkets = null;
 
 const EXPLORE_SCENARIOS = [
-  { key: "best", label: "Best entry",     daysBack: null },
-  { key: "27d",  label: "27D before close", daysBack: 27 },
-  { key: "9d",   label: "9D before close",  daysBack: 9  },
-  { key: "3d",   label: "3D before close",  daysBack: 3  },
-  { key: "1d",   label: "1D before close",  daysBack: 1  },
+  { key: "best", label: "Best entry",       daysBack: null },
+  { key: "30d",  label: "30D before close", daysBack: 30  },
+  { key: "25d",  label: "25D before close", daysBack: 25  },
+  { key: "20d",  label: "20D before close", daysBack: 20  },
+  { key: "15d",  label: "15D before close", daysBack: 15  },
+  { key: "10d",  label: "10D before close", daysBack: 10  },
+  { key: "5d",   label: "5D before close",  daysBack: 5   },
+  { key: "1d",   label: "1D before close",  daysBack: 1   },
 ];
 
 function exploreFindNDaysBefore(times, daysBack) {
