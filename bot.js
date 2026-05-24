@@ -699,7 +699,7 @@ function createServer() {
         const qs = new URL(req.url, "http://localhost").searchParams;
         const minTiers = Math.max(3, parseInt(qs.get("minTiers") || "5", 10));
         const pattern  = ["all","normal","extremes"].includes(qs.get("pattern")) ? qs.get("pattern") : "all";
-        const maxPages = Math.min(12, Math.max(1, parseInt(qs.get("maxPages") || "8", 10)));
+        const maxPages = Math.min(12, Math.max(1, parseInt(qs.get("maxPages") || "12", 10)));
 
         function classifyDist(prices) {
           const n = prices.length;
@@ -717,40 +717,38 @@ function createServer() {
           return "other";
         }
 
+        // Fetch all pages in parallel — faster and resilient to individual page timeouts
+        const pageUrls = Array.from({ length: maxPages }, (_, i) =>
+          `${appConfig.gammaBaseUrl}/events?limit=100&offset=${i * 100}&order=startDate&ascending=false`);
+        const pages = await Promise.allSettled(
+          pageUrls.map(url => fetchJsonWithTimeout(url, appConfig.requestTimeoutMs * 2))
+        );
+
         const results = [];
-        try {
-          for (let page = 0; page < maxPages && results.length < 50; page++) {
-            const url = `${appConfig.gammaBaseUrl}/events?limit=100&offset=${page * 100}&order=startDate&ascending=false`;
-            let batch;
-            try {
-              batch = await fetchJsonWithTimeout(url, appConfig.requestTimeoutMs * 2);
-            } catch { break; } // page timed out — return what we have
-            if (!Array.isArray(batch) || !batch.length) break;
-            for (const ev of batch) {
-              const markets = ev.markets || [];
-              const prices = markets.map(m => {
-                const op = parseJsonField(m.outcomePrices, []);
-                return Number(op[0]);
-              }).filter(p => p > 0 && p < 1);
-              if (prices.length < minTiers) continue;
-              const dist = classifyDist(prices);
-              if (!dist) continue;
-              if (pattern !== "all" && dist !== pattern) continue;
-              const sumP = prices.reduce((a, b) => a + b, 0);
-              results.push({
-                title: ev.title || ev.slug,
-                slug: ev.slug,
-                endDate: ev.endDate || null,
-                closed: ev.closed === true,
-                tierCount: prices.length,
-                sumP: Math.round(sumP * 1000) / 1000,
-                dist,
-                prices: prices.map(p => Math.round(p * 1000) / 1000),
-              });
-            }
+        for (const page of pages) {
+          if (page.status !== "fulfilled" || !Array.isArray(page.value)) continue;
+          for (const ev of page.value) {
+            const markets = ev.markets || [];
+            const prices = markets.map(m => {
+              const op = parseJsonField(m.outcomePrices, []);
+              return Number(op[0]);
+            }).filter(p => p > 0 && p < 1);
+            if (prices.length < minTiers) continue;
+            const dist = classifyDist(prices);
+            if (!dist) continue;
+            if (pattern !== "all" && dist !== pattern) continue;
+            const sumP = prices.reduce((a, b) => a + b, 0);
+            results.push({
+              title: ev.title || ev.slug,
+              slug: ev.slug,
+              endDate: ev.endDate || null,
+              closed: ev.closed === true,
+              tierCount: prices.length,
+              sumP: Math.round(sumP * 1000) / 1000,
+              dist,
+              prices: prices.map(p => Math.round(p * 1000) / 1000),
+            });
           }
-        } catch (err) {
-          if (!results.length) return sendJson(res, 502, { error: err.message });
         }
         results.sort((a, b) => a.sumP - b.sumP);
         return sendJson(res, 200, results.slice(0, 50));

@@ -1448,10 +1448,10 @@ async function exploreScan() {
   const resultsEl = document.getElementById("exp-scan-results");
   const btn = document.getElementById("exp-scan-btn");
   btn.disabled = true;
-  statusEl.textContent = "Scanning…";
+  statusEl.innerHTML = `<span class="scan-spinner"></span> Scanning 1200 events…`;
   resultsEl.innerHTML = "";
   try {
-    const res = await fetch(`/explore/scan?pattern=${encodeURIComponent(pattern)}&minTiers=5&maxPages=8`, { cache: "no-store" });
+    const res = await fetch(`/explore/scan?pattern=${encodeURIComponent(pattern)}&minTiers=5&maxPages=12`, { cache: "no-store" });
     if (!res.ok) { statusEl.textContent = "Scan failed."; return; }
     const results = await res.json();
     statusEl.textContent = results.length ? `${results.length} pools found` : "No matching pools found.";
