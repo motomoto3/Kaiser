@@ -2033,23 +2033,12 @@ function exploreRenderScenarioTable(container, aligned, markets) {
     }).join("")}
   </tr>`;
 
-  // Mid-market value at last data point
-  const midRow = `<tr class="sc-summary-row">
-    <td class="sc-summ-label">Last px</td>
-    ${scenarios.map(sc => {
-      if (!sc.result) return `<td class="num muted${sc.isBest ? " sc-col-best" : ""}">—</td>`;
-      const { midPct, midPnl } = sc.result;
-      const sign = midPnl >= 0 ? "+" : "";
-      return scCell(sc, `sc-pnl ${midPnl >= 0 ? "bid" : "ask"}`,
-        `${sign}${midPct.toFixed(1)}%<br><span class="sc-alloc">${sign}$${Math.abs(midPnl).toFixed(2)}</span>`);
-    }).join("")}
-  </tr>`;
 
   container.innerHTML = `
     <div class="explore-table-scroll">
       <table class="explore-table">
         <thead>${thead}</thead>
-        <tbody>${tierRows}${sumRow}${guarRow}${midRow}</tbody>
+        <tbody>${tierRows}${sumRow}${guarRow}</tbody>
       </table>
     </div>
     <p class="sc-foot muted">D<sub>i</sub> = $total × p<sub>i</sub> / Σp — equal payout on any winner · hover price for shares</p>`;
