@@ -1833,6 +1833,17 @@ function exploreFindNDaysBefore(times, daysBack) {
   return best;
 }
 
+function exploreEffectivePrice(prices, id, idx) {
+  // Use actual price at idx; if market didn't exist yet, fall back to first available price
+  const p = prices[id]?.[idx];
+  if (p !== null && p !== undefined && p > 0) return p;
+  const ps = prices[id] || [];
+  for (let i = 0; i < ps.length; i++) {
+    if (ps[i] !== null && ps[i] > 0) return ps[i];
+  }
+  return null;
+}
+
 function exploreScenarioReturn(aligned, selectedIds, entryIdx, total) {
   // Proportional allocation: D_i = total × p_i / Σp_j
   // → any winner pays the same: D_i / p_i = total / Σp_j
@@ -1844,8 +1855,8 @@ function exploreScenarioReturn(aligned, selectedIds, entryIdx, total) {
   const tierPrices = {}, allocation = {};
   let sumEntry = 0;
   for (const id of selectedIds) {
-    const p = prices[id]?.[entryIdx];
-    if (!p || p <= 0) return null;
+    const p = exploreEffectivePrice(prices, id, entryIdx);
+    if (!p) return null;
     tierPrices[id] = p;
     sumEntry += p;
   }
@@ -1884,8 +1895,8 @@ function exploreBestEntryIdx(aligned, selectedIds, total) {
   for (let te = 0; te < n - 1; te++) {
     let sum = 0, valid = true;
     for (const id of selectedIds) {
-      const p = prices[id]?.[te];
-      if (!p || p <= 0) { valid = false; break; }
+      const p = exploreEffectivePrice(prices, id, te);
+      if (!p) { valid = false; break; }
       sum += p;
     }
     if (valid && sum < lowestSum) { lowestSum = sum; bestIdx = te; }
