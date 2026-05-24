@@ -570,6 +570,19 @@ td {
   width: 9px;
 }
 
+.explore-legend-winner { font-weight: 500; color: var(--text); }
+
+.explore-win-badge {
+  background: color-mix(in srgb, var(--bid) 20%, transparent);
+  border: 1px solid var(--bid);
+  border-radius: 3px;
+  color: var(--bid);
+  font-size: 0.65rem;
+  letter-spacing: 0.03em;
+  padding: 0.05rem 0.3rem;
+  vertical-align: middle;
+}
+
 .explore-return-label {
   color: var(--muted);
   font-family: "IBM Plex Mono", monospace;

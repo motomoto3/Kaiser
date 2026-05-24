@@ -1319,7 +1319,7 @@ function buildExploration() {
           <select id="exp-slug-sel" class="explore-sel"></select>
           <span class="explore-or muted">or</span>
           <input id="exp-slug-txt" class="slug-input" type="text"
-            placeholder="any-event-slug" spellcheck="false" style="width:260px">
+            placeholder="polymarket.com/event/… or slug" spellcheck="false" style="width:300px">
         </div>
         <div class="explore-row">
           <span class="explore-label">Range</span>
@@ -1361,9 +1361,10 @@ function exploreRefreshSlugs() {
 }
 
 async function exploreGo() {
-  const slug = (document.getElementById("exp-slug-txt").value.trim() ||
-                document.getElementById("exp-slug-sel").value.trim());
-  if (!slug) { alert("Please select or enter an event slug."); return; }
+  const raw = document.getElementById("exp-slug-txt").value.trim() ||
+              document.getElementById("exp-slug-sel").value.trim();
+  const slug = slugFromInput(raw);
+  if (!slug) { alert("Please select or enter an event slug or URL."); return; }
 
   const status = document.getElementById("exp-status");
   const charts = document.getElementById("exp-charts");
@@ -1507,14 +1508,17 @@ function exploreBuildPriceChart(aligned, markets, optT) {
   // Axes
   s += `<line x1="${ML}" y1="${MT}" x2="${ML}" y2="${MT+PH}" stroke="#30363d" stroke-width="1"/>`;
   s += `<line x1="${ML}" y1="${MT+PH}" x2="${W-MR}" y2="${MT+PH}" stroke="#30363d" stroke-width="1"/>`;
-  // Market lines
+  // Market lines (winner drawn thicker, losers dimmed when resolved)
+  const anyResolved = markets.some(m => m.resolved);
   markets.forEach((m, i) => {
     const ps = prices[m.id];
     if (!ps) return;
     const color = EXPLORE_COLORS[i % EXPLORE_COLORS.length];
+    const width = m.won ? 2.5 : 1.8;
+    const opacity = anyResolved && !m.won ? 0.35 : 1;
     const pts = times.map((t, j) => ps[j] !== null ? `${xS(t).toFixed(1)},${yS(ps[j]).toFixed(1)}` : null)
       .filter(Boolean).join(" ");
-    if (pts) s += `<polyline points="${pts}" fill="none" stroke="${color}" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/>`;
+    if (pts) s += `<polyline points="${pts}" fill="none" stroke="${color}" stroke-width="${width}" stroke-linejoin="round" stroke-linecap="round" opacity="${opacity}"/>`;
   });
   // Optimal entry marker
   if (optT !== null) {
@@ -1620,13 +1624,13 @@ function exploreRender(data) {
   });
   const optT = optIdx >= 0 ? returnSeries[optIdx].t : null;
 
-  // Build legend
+  // Build legend (winners get a ✓ badge)
   const legend = document.createElement("div");
   legend.className = "explore-legend";
   legend.innerHTML = markets.map((m, i) =>
-    `<span class="explore-legend-item">
+    `<span class="explore-legend-item${m.won ? " explore-legend-winner" : ""}">
       <span class="explore-legend-dot" style="background:${EXPLORE_COLORS[i % EXPLORE_COLORS.length]}"></span>
-      ${escHtml(m.label)}
+      ${escHtml(m.label)}${m.won ? " <span class='explore-win-badge'>✓ resolved</span>" : ""}
     </span>`).join("");
 
   // Build charts

@@ -706,11 +706,17 @@ function createServer() {
           const evData = await fetchJsonWithTimeout(evUrl, appConfig.requestTimeoutMs);
           const ev = Array.isArray(evData) ? evData[0] : evData;
           if (!ev) return sendJson(res, 404, { error: "Event not found" });
-          const markets = (ev.markets || []).map(m => ({
-            id: m.id,
-            label: String(m.groupItemTitle || m.question || m.id),
-            clobTokenIds: parseJsonField(m.clobTokenIds, []),
-          }));
+          const markets = (ev.markets || []).map(m => {
+            const outcomePrices = parseJsonField(m.outcomePrices, []);
+            const yesPrice = Number(outcomePrices[0]);
+            return {
+              id: m.id,
+              label: String(m.groupItemTitle || m.question || m.id),
+              clobTokenIds: parseJsonField(m.clobTokenIds, []),
+              resolved: m.closed === true,
+              won: yesPrice === 1,
+            };
+          });
           const history = {};
           await Promise.allSettled(markets.map(async m => {
             const tokenId = m.clobTokenIds[0];
