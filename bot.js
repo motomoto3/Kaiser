@@ -709,7 +709,7 @@ function createServer() {
           const markets = (ev.markets || []).map(m => ({
             id: m.id,
             label: String(m.groupItemTitle || m.question || m.id),
-            clobTokenIds: Array.isArray(m.clobTokenIds) ? m.clobTokenIds : [],
+            clobTokenIds: parseJsonField(m.clobTokenIds, []),
           }));
           const history = {};
           await Promise.allSettled(markets.map(async m => {
