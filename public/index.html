@@ -24,11 +24,28 @@
     </div>
   </header>
 
-  <main id="main">
-    <div class="loading" id="loading">Fetching market data…</div>
-  </main>
+  <nav id="tab-nav">
+    <div class="tab-nav-inner">
+      <button class="tab-btn active" data-tab="dashboard">Dashboard</button>
+      <button class="tab-btn" data-tab="calculator">Calculator</button>
+      <button class="tab-btn" data-tab="explore">Exploration</button>
+    </div>
+  </nav>
 
-  <div id="calc-root"></div>
+  <div id="tab-dashboard" class="tab-panel">
+    <div id="events-panel-mount"></div>
+    <main id="main">
+      <div class="loading" id="loading">Fetching market data…</div>
+    </main>
+  </div>
+
+  <div id="tab-calculator" class="tab-panel" hidden>
+    <div id="calc-root"></div>
+  </div>
+
+  <div id="tab-explore" class="tab-panel" hidden>
+    <div id="explore-root"></div>
+  </div>
 
   <script src="/public/app.js" defer></script>
 </body>

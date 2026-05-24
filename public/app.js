@@ -351,7 +351,9 @@ function buildSlugManager(slugs) {
           <button id="wallet-clear-btn" class="btn-preset">Clear</button>
         </div>
       </div>`;
-    document.querySelector("header").after(panel);
+    const mount = document.getElementById("events-panel-mount");
+    if (mount) mount.appendChild(panel);
+    else document.querySelector("header").after(panel);
 
     document.getElementById("slug-add-btn").addEventListener("click", () => {
       const input = document.getElementById("slug-input");
@@ -551,6 +553,22 @@ document.getElementById("refreshBtn").addEventListener("click", () => {
 
 refresh();
 refreshTimer = setInterval(refresh, AUTO_REFRESH_MS);
+
+// ── Tab System ─────────────────────────────────────────────────────────────
+
+function switchTab(name) {
+  document.querySelectorAll(".tab-btn").forEach(b =>
+    b.classList.toggle("active", b.dataset.tab === name));
+  document.querySelectorAll(".tab-panel").forEach(p =>
+    p.hidden = p.id !== `tab-${name}`);
+  if (name === "explore") {
+    buildExploration();
+    exploreRefreshSlugs();
+  }
+}
+
+document.querySelectorAll(".tab-btn").forEach(btn =>
+  btn.addEventListener("click", () => switchTab(btn.dataset.tab)));
 
 // ── Tier Matrix Calculator ─────────────────────────────────────────────────
 
@@ -1154,7 +1172,7 @@ function buildCalc(events) {
 
     document.getElementById("c-px").addEventListener("change", e => {
       calc.priceType = e.target.value;
-      calcSyncPrices();
+      if (!calc.snapshotMode) calcSyncPrices();
     });
 
     document.getElementById("c-total").addEventListener("input", e => {
@@ -1273,4 +1291,450 @@ function buildCalc(events) {
 
   // Sync live prices without disturbing user's factor settings (skip in snapshot mode)
   if (calc.slug && !calc.snapshotMode) calcSyncPrices();
+}
+
+// ── Exploration Mode ────────────────────────────────────────────────────────
+
+const EXPLORE_COLORS = [
+  "#58a6ff","#3fb950","#f85149","#d2a8ff","#ffa657",
+  "#79c0ff","#56d364","#ff7b72","#e2a9f3","#ffca86",
+  "#39d353","#ff9966","#a5d8ff","#ffe566","#c9b8ff",
+];
+
+const EXPLORE_ML = 60, EXPLORE_MR = 20, EXPLORE_MB = 46;
+
+let exploreState = { interval: "max" };
+let _exploreTooltip = null;
+
+function buildExploration() {
+  const root = document.getElementById("explore-root");
+  if (!root || root.dataset.built) return;
+  root.dataset.built = "1";
+
+  root.innerHTML = `
+    <div class="explore-wrap">
+      <div class="explore-controls">
+        <div class="explore-row">
+          <span class="explore-label">Event</span>
+          <select id="exp-slug-sel" class="explore-sel"></select>
+          <span class="explore-or muted">or</span>
+          <input id="exp-slug-txt" class="slug-input" type="text"
+            placeholder="any-event-slug" spellcheck="false" style="width:260px">
+        </div>
+        <div class="explore-row">
+          <span class="explore-label">Range</span>
+          <div class="exp-range-btns" role="group">
+            <button class="exp-range-btn" data-iv="1d">1D</button>
+            <button class="exp-range-btn" data-iv="1w">1W</button>
+            <button class="exp-range-btn" data-iv="1m">1M</button>
+            <button class="exp-range-btn active" data-iv="max">Max</button>
+          </div>
+          <button id="exp-go-btn" class="btn-preset">Analyze ▶</button>
+        </div>
+      </div>
+      <div id="exp-status" hidden></div>
+      <div id="exp-charts"></div>
+    </div>`;
+
+  root.querySelectorAll(".exp-range-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      root.querySelectorAll(".exp-range-btn").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      exploreState.interval = btn.dataset.iv;
+    });
+  });
+
+  document.getElementById("exp-go-btn").addEventListener("click", exploreGo);
+  document.getElementById("exp-slug-txt").addEventListener("keydown", e => {
+    if (e.key === "Enter") exploreGo();
+  });
+}
+
+function exploreRefreshSlugs() {
+  const sel = document.getElementById("exp-slug-sel");
+  if (!sel) return;
+  const prev = sel.value;
+  const slugs = window._lastData?.slugs || [];
+  sel.innerHTML = `<option value="">— tracked events —</option>` +
+    slugs.map(s => `<option value="${escHtml(s)}">${escHtml(s)}</option>`).join("");
+  if (prev) sel.value = prev;
+}
+
+async function exploreGo() {
+  const slug = (document.getElementById("exp-slug-txt").value.trim() ||
+                document.getElementById("exp-slug-sel").value.trim());
+  if (!slug) { alert("Please select or enter an event slug."); return; }
+
+  const status = document.getElementById("exp-status");
+  const charts = document.getElementById("exp-charts");
+  status.hidden = false;
+  status.textContent = "Fetching historical data…";
+  charts.innerHTML = "";
+  if (_exploreTooltip) _exploreTooltip.hidden = true;
+
+  const btn = document.getElementById("exp-go-btn");
+  btn.disabled = true;
+  try {
+    const res = await fetch(
+      `/explore?slug=${encodeURIComponent(slug)}&interval=${exploreState.interval}&fidelity=200`,
+      { cache: "no-store" }
+    );
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+      status.textContent = "Error: " + (err.error || "unknown");
+      return;
+    }
+    const data = await res.json();
+    status.hidden = true;
+    exploreRender(data);
+  } catch (err) {
+    status.textContent = "Error: " + err.message;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function exploreAlignSeries(history, markets, n) {
+  let tMin = Infinity, tMax = -Infinity;
+  markets.forEach(m => {
+    const h = history[m.id];
+    if (!h || !h.length) return;
+    tMin = Math.min(tMin, h[0].t);
+    tMax = Math.max(tMax, h[h.length - 1].t);
+  });
+  if (!isFinite(tMin)) return null;
+
+  const times = Array.from({ length: n }, (_, i) => tMin + (tMax - tMin) * i / (n - 1));
+  const prices = {};
+  markets.forEach(m => {
+    const h = (history[m.id] || []).slice().sort((a, b) => a.t - b.t);
+    prices[m.id] = times.map(t => {
+      if (!h.length) return null;
+      if (t <= h[0].t) return h[0].p;
+      if (t >= h[h.length - 1].t) return h[h.length - 1].p;
+      let lo = 0, hi = h.length - 1;
+      while (lo + 1 < hi) {
+        const mid = (lo + hi) >> 1;
+        if (h[mid].t <= t) lo = mid; else hi = mid;
+      }
+      return h[lo].p + (h[hi].p - h[lo].p) * (t - h[lo].t) / (h[hi].t - h[lo].t);
+    });
+  });
+  return { times, prices, tMin, tMax };
+}
+
+function exploreComputeReturns(aligned, markets) {
+  const { times, prices } = aligned;
+  const n = times.length;
+
+  // Build weights from current calc rows for matching markets, or equal weight
+  const included = markets.filter(m => {
+    const r = calc.rows.find(r => r.id === m.id);
+    return !r || r.included !== false;
+  });
+  let totalW = 0;
+  const rawW = {};
+  included.forEach(m => {
+    const r = calc.rows.find(r => r.id === m.id);
+    const w = r ? Math.max(0.01, r.factor) : 1;
+    rawW[m.id] = w;
+    totalW += w;
+  });
+  if (totalW === 0) { included.forEach(m => { rawW[m.id] = 1; totalW += 1; }); }
+  const weights = {};
+  included.forEach(m => { weights[m.id] = rawW[m.id] / totalW; });
+
+  const finalPx = {};
+  included.forEach(m => { finalPx[m.id] = prices[m.id]?.[n - 1] ?? null; });
+
+  const series = [];
+  for (let te = 0; te < n - 1; te++) {
+    let ret = 0, valid = true;
+    included.forEach(m => {
+      const pE = prices[m.id]?.[te];
+      const pX = finalPx[m.id];
+      if (!pE || !pX || pE <= 0) { valid = false; return; }
+      ret += weights[m.id] * (pX / pE - 1);
+    });
+    if (valid) series.push({ t: times[te], pct: ret * 100 });
+  }
+  return series;
+}
+
+function exploreFmtDate(t, tMin, tMax) {
+  const d = new Date(t * 1000);
+  const range = tMax - tMin;
+  if (range < 2 * 86400) return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  if (range < 90 * 86400) return d.toLocaleDateString([], { month: "short", day: "numeric" });
+  return d.toLocaleDateString([], { month: "short", year: "2-digit" });
+}
+
+function exploreFmtDateFull(t) {
+  const d = new Date(t * 1000);
+  return d.toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" }) +
+    " " + d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+function exploreMakeSVG(W, H, content) {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.setAttribute("class", "explore-chart");
+  svg.innerHTML = content;
+  return svg;
+}
+
+function exploreBuildPriceChart(aligned, markets, optT) {
+  const { times, prices, tMin, tMax } = aligned;
+  const W = 900, H = 270, MT = 18, MB = EXPLORE_MB, ML = EXPLORE_ML, MR = EXPLORE_MR;
+  const PW = W - ML - MR, PH = H - MT - MB;
+
+  const xS = t => ML + (t - tMin) / (tMax - tMin) * PW;
+  const yS = p => MT + PH * (1 - Math.max(0, Math.min(1, p)));
+
+  let s = "";
+  // Y grid + labels
+  [0, 0.2, 0.4, 0.6, 0.8, 1.0].forEach(p => {
+    const y = yS(p).toFixed(1);
+    s += `<line x1="${ML}" y1="${y}" x2="${W-MR}" y2="${y}" stroke="#30363d" stroke-width="1"/>`;
+    s += `<text x="${ML-6}" y="${(+y+4).toFixed(1)}" fill="#8b949e" font-size="11" text-anchor="end" font-family="IBM Plex Mono,monospace">${p.toFixed(1)}</text>`;
+  });
+  // X labels
+  const numX = 6;
+  for (let i = 0; i < numX; i++) {
+    const t = tMin + (tMax - tMin) * i / (numX - 1);
+    s += `<text x="${xS(t).toFixed(1)}" y="${(MT+PH+17).toFixed(1)}" fill="#8b949e" font-size="11" text-anchor="middle" font-family="IBM Plex Mono,monospace">${exploreFmtDate(t, tMin, tMax)}</text>`;
+  }
+  // Axes
+  s += `<line x1="${ML}" y1="${MT}" x2="${ML}" y2="${MT+PH}" stroke="#30363d" stroke-width="1"/>`;
+  s += `<line x1="${ML}" y1="${MT+PH}" x2="${W-MR}" y2="${MT+PH}" stroke="#30363d" stroke-width="1"/>`;
+  // Market lines
+  markets.forEach((m, i) => {
+    const ps = prices[m.id];
+    if (!ps) return;
+    const color = EXPLORE_COLORS[i % EXPLORE_COLORS.length];
+    const pts = times.map((t, j) => ps[j] !== null ? `${xS(t).toFixed(1)},${yS(ps[j]).toFixed(1)}` : null)
+      .filter(Boolean).join(" ");
+    if (pts) s += `<polyline points="${pts}" fill="none" stroke="${color}" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/>`;
+  });
+  // Optimal entry marker
+  if (optT !== null) {
+    const x = xS(optT).toFixed(1);
+    s += `<line x1="${x}" y1="${MT}" x2="${x}" y2="${MT+PH}" stroke="#3fb950" stroke-width="1.5" stroke-dasharray="5,3"/>`;
+    s += `<text x="${(+x+5).toFixed(1)}" y="${(MT+13).toFixed(1)}" fill="#3fb950" font-size="10" font-family="IBM Plex Mono,monospace">best entry</text>`;
+  }
+  // Crosshair + hover
+  s += `<line x1="${ML}" y1="${MT}" x2="${ML}" y2="${MT+PH}" stroke="#58a6ff" stroke-width="1" opacity="0.7" visibility="hidden" class="exp-xhair"/>`;
+  s += `<rect x="${ML}" y="${MT}" width="${PW}" height="${PH}" fill="transparent" class="exp-hover"/>`;
+
+  const svg = exploreMakeSVG(W, H, s);
+  svg.dataset.tmin = tMin; svg.dataset.tmax = tMax;
+  svg.dataset.ml = ML; svg.dataset.pw = PW;
+  svg.dataset.mt = MT; svg.dataset.ph = PH;
+  return svg;
+}
+
+function exploreBuildReturnChart(tMin, tMax, returnSeries, optT) {
+  const W = 900, H = 170, MT = 15, MB = EXPLORE_MB, ML = EXPLORE_ML, MR = EXPLORE_MR;
+  const PW = W - ML - MR, PH = H - MT - MB;
+
+  const xS = t => ML + (t - tMin) / (tMax - tMin) * PW;
+  const pcts = returnSeries.map(s => s.pct);
+  let yMin = Math.min(0, ...pcts), yMax = Math.max(0, ...pcts);
+  const pad = Math.max(5, (yMax - yMin) * 0.12);
+  yMin -= pad; yMax += pad;
+  if (yMax - yMin < 1) { yMin = -5; yMax = 5; }
+  const yS = p => MT + PH - (p - yMin) / (yMax - yMin) * PH;
+
+  let s = "";
+  const y0 = yS(0);
+  // Grid at zero + range bounds
+  [yMin, 0, yMax].forEach(v => {
+    const y = yS(v).toFixed(1);
+    s += `<line x1="${ML}" y1="${y}" x2="${W-MR}" y2="${y}" stroke="#30363d" stroke-width="${v === 0 ? 1 : 0.5}"/>`;
+    s += `<text x="${ML-6}" y="${(+y+4).toFixed(1)}" fill="#8b949e" font-size="11" text-anchor="end" font-family="IBM Plex Mono,monospace">${(v >= 0 ? "+" : "") + v.toFixed(0)}%</text>`;
+  });
+  // X labels
+  const numX = 6;
+  for (let i = 0; i < numX; i++) {
+    const t = tMin + (tMax - tMin) * i / (numX - 1);
+    s += `<text x="${xS(t).toFixed(1)}" y="${(MT+PH+17).toFixed(1)}" fill="#8b949e" font-size="11" text-anchor="middle" font-family="IBM Plex Mono,monospace">${exploreFmtDate(t, tMin, tMax)}</text>`;
+  }
+  // Axes
+  s += `<line x1="${ML}" y1="${MT}" x2="${ML}" y2="${MT+PH}" stroke="#30363d" stroke-width="1"/>`;
+  s += `<line x1="${ML}" y1="${MT+PH}" x2="${W-MR}" y2="${MT+PH}" stroke="#30363d" stroke-width="1"/>`;
+
+  if (returnSeries.length > 1) {
+    // Fill above zero (green)
+    const posPath = returnSeries.map((p, i) => {
+      const x = xS(p.t), y = Math.min(yS(p.pct), y0);
+      return i === 0 ? `M${x.toFixed(1)},${y0.toFixed(1)} L${x.toFixed(1)},${y.toFixed(1)}` : `L${x.toFixed(1)},${y.toFixed(1)}`;
+    }).join(" ") + ` L${xS(returnSeries[returnSeries.length-1].t).toFixed(1)},${y0.toFixed(1)} Z`;
+    s += `<path d="${posPath}" fill="#3fb950" opacity="0.18"/>`;
+    // Fill below zero (red)
+    const negPath = returnSeries.map((p, i) => {
+      const x = xS(p.t), y = Math.max(yS(p.pct), y0);
+      return i === 0 ? `M${x.toFixed(1)},${y0.toFixed(1)} L${x.toFixed(1)},${y.toFixed(1)}` : `L${x.toFixed(1)},${y.toFixed(1)}`;
+    }).join(" ") + ` L${xS(returnSeries[returnSeries.length-1].t).toFixed(1)},${y0.toFixed(1)} Z`;
+    s += `<path d="${negPath}" fill="#f85149" opacity="0.18"/>`;
+    // Return line
+    const pts = returnSeries.map(p => `${xS(p.t).toFixed(1)},${yS(p.pct).toFixed(1)}`).join(" ");
+    s += `<polyline points="${pts}" fill="none" stroke="#58a6ff" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/>`;
+  }
+  // Optimal entry marker
+  if (optT !== null) {
+    const x = xS(optT).toFixed(1);
+    s += `<line x1="${x}" y1="${MT}" x2="${x}" y2="${MT+PH}" stroke="#3fb950" stroke-width="1.5" stroke-dasharray="5,3"/>`;
+  }
+  // Crosshair + hover
+  s += `<line x1="${ML}" y1="${MT}" x2="${ML}" y2="${MT+PH}" stroke="#58a6ff" stroke-width="1" opacity="0.7" visibility="hidden" class="exp-xhair"/>`;
+  s += `<rect x="${ML}" y="${MT}" width="${PW}" height="${PH}" fill="transparent" class="exp-hover"/>`;
+
+  const svg = exploreMakeSVG(W, H, s);
+  svg.dataset.tmin = tMin; svg.dataset.tmax = tMax;
+  svg.dataset.ml = ML; svg.dataset.pw = PW;
+  svg.dataset.mt = MT; svg.dataset.ph = PH;
+  svg.dataset.ymin = yMin; svg.dataset.ymax = yMax;
+  return svg;
+}
+
+function exploreRender(data) {
+  const { event, history } = data;
+  const charts = document.getElementById("exp-charts");
+  if (!charts) return;
+
+  const markets = event.markets.filter(m => (history[m.id] || []).length > 1);
+  if (!markets.length) {
+    charts.innerHTML = `<p class="muted" style="padding:2rem 0">No price history available for this event.</p>`;
+    return;
+  }
+
+  const aligned = exploreAlignSeries(history, markets, 200);
+  if (!aligned) return;
+
+  const returnSeries = exploreComputeReturns(aligned, markets);
+
+  let optIdx = -1, optRet = -Infinity, worstIdx = -1, worstRet = Infinity;
+  returnSeries.forEach((s, i) => {
+    if (s.pct > optRet) { optRet = s.pct; optIdx = i; }
+    if (s.pct < worstRet) { worstRet = s.pct; worstIdx = i; }
+  });
+  const optT = optIdx >= 0 ? returnSeries[optIdx].t : null;
+
+  // Build legend
+  const legend = document.createElement("div");
+  legend.className = "explore-legend";
+  legend.innerHTML = markets.map((m, i) =>
+    `<span class="explore-legend-item">
+      <span class="explore-legend-dot" style="background:${EXPLORE_COLORS[i % EXPLORE_COLORS.length]}"></span>
+      ${escHtml(m.label)}
+    </span>`).join("");
+
+  // Build charts
+  const priceSvg  = exploreBuildPriceChart(aligned, markets, optT);
+  const returnSvg = exploreBuildReturnChart(aligned.tMin, aligned.tMax, returnSeries, optT);
+
+  // Summary
+  const weights = calc.rows.some(r => markets.find(m => m.id === r.id)) ? "current calculator weights" : "equal weights";
+  const summHtml = `
+    <div class="explore-summary">
+      <div class="explore-summary-row">
+        <span class="explore-summ-label">Best entry</span>
+        <span class="explore-summ-val">${optIdx >= 0 ? exploreFmtDateFull(returnSeries[optIdx].t) : "—"}</span>
+        <span class="explore-summ-pct bid">${optIdx >= 0 ? (optRet >= 0 ? "+" : "") + optRet.toFixed(1) + "%" : "—"}</span>
+        ${calc.total && optIdx >= 0 ? `<span class="explore-summ-eur">(${fmtEur(calc.total * optRet / 100)})</span>` : ""}
+      </div>
+      <div class="explore-summary-row">
+        <span class="explore-summ-label">Worst entry</span>
+        <span class="explore-summ-val">${worstIdx >= 0 ? exploreFmtDateFull(returnSeries[worstIdx].t) : "—"}</span>
+        <span class="explore-summ-pct ${worstRet < 0 ? "ask" : "bid"}">${worstIdx >= 0 ? (worstRet >= 0 ? "+" : "") + worstRet.toFixed(1) + "%" : "—"}</span>
+        ${calc.total && worstIdx >= 0 ? `<span class="explore-summ-eur">(${fmtEur(calc.total * worstRet / 100)})</span>` : ""}
+      </div>
+      <div class="explore-summary-row" style="font-size:0.73rem;color:var(--muted);margin-top:0.1rem">
+        Exit basis: last available data point · Allocation: ${escHtml(weights)}
+      </div>
+    </div>`;
+
+  charts.innerHTML = `<h3 class="explore-event-title">${escHtml(event.title || event.slug)}</h3>`;
+  charts.appendChild(priceSvg);
+  charts.appendChild(legend);
+  charts.insertAdjacentHTML("beforeend", `<div class="explore-return-label">Return % if entered at T (exit = last data point)</div>`);
+  charts.appendChild(returnSvg);
+  charts.insertAdjacentHTML("beforeend", summHtml);
+
+  exploreAddInteraction(priceSvg, returnSvg, aligned, markets, returnSeries);
+}
+
+function exploreAddInteraction(priceSvg, returnSvg, aligned, markets, returnSeries) {
+  const { times, prices, tMin, tMax } = aligned;
+  const ML = EXPLORE_ML, PW = 900 - ML - EXPLORE_MR;
+
+  if (!_exploreTooltip) {
+    _exploreTooltip = document.createElement("div");
+    _exploreTooltip.className = "explore-tooltip";
+    _exploreTooltip.hidden = true;
+    document.body.appendChild(_exploreTooltip);
+  }
+  const tooltip = _exploreTooltip;
+
+  function tFromClientX(svgEl, clientX) {
+    const rect = svgEl.getBoundingClientRect();
+    const scale = svgEl.viewBox.baseVal.width / rect.width;
+    const svgX = (clientX - rect.left) * scale;
+    return tMin + Math.max(0, Math.min(1, (svgX - ML) / PW)) * (tMax - tMin);
+  }
+
+  function nearestIdx(t) {
+    let best = 0, bestD = Infinity;
+    times.forEach((ti, i) => { const d = Math.abs(ti - t); if (d < bestD) { bestD = d; best = i; } });
+    return best;
+  }
+
+  function setCrosshairs(frac) {
+    const svgX = (ML + frac * PW).toFixed(1);
+    [priceSvg, returnSvg].forEach(svg => {
+      const xh = svg.querySelector(".exp-xhair");
+      if (xh) { xh.setAttribute("x1", svgX); xh.setAttribute("x2", svgX); xh.setAttribute("visibility", "visible"); }
+    });
+  }
+
+  function onMove(svgEl, e) {
+    const t = tFromClientX(svgEl, e.clientX);
+    const idx = nearestIdx(t);
+    const snap = times[idx];
+    const frac = (snap - tMin) / (tMax - tMin);
+    setCrosshairs(frac);
+
+    const priceLines = markets.map((m, i) => {
+      const p = prices[m.id]?.[idx];
+      const color = EXPLORE_COLORS[i % EXPLORE_COLORS.length];
+      const label = m.label.length > 30 ? m.label.slice(0, 28) + "…" : m.label;
+      return `<div><span style="color:${color}">■</span> ${escHtml(label)}: <strong>${p !== null && p !== undefined ? (p * 100).toFixed(1) + "¢" : "—"}</strong></div>`;
+    }).join("");
+
+    const nearest = returnSeries.reduce((best, s) =>
+      Math.abs(s.t - snap) < Math.abs(best.t - snap) ? s : best, returnSeries[0] || { t: 0, pct: 0 });
+    const retLine = returnSeries.length
+      ? `<div class="explore-tooltip-ret ${nearest.pct >= 0 ? "bid" : "ask"}">${nearest.pct >= 0 ? "+" : ""}${nearest.pct.toFixed(1)}% return if entered here</div>`
+      : "";
+
+    tooltip.innerHTML = `<div class="explore-tooltip-time">${exploreFmtDateFull(snap)}</div>${priceLines}${retLine}`;
+    const x = Math.min(e.clientX + 18, window.innerWidth - 290);
+    const y = Math.max(10, e.clientY - 16);
+    tooltip.style.left = x + "px";
+    tooltip.style.top  = y + "px";
+    tooltip.hidden = false;
+  }
+
+  function onLeave() {
+    [priceSvg, returnSvg].forEach(svg => {
+      const xh = svg.querySelector(".exp-xhair");
+      if (xh) xh.setAttribute("visibility", "hidden");
+    });
+    tooltip.hidden = true;
+  }
+
+  [priceSvg, returnSvg].forEach(svg => {
+    svg.addEventListener("mousemove", e => onMove(svg, e));
+    svg.addEventListener("mouseleave", onLeave);
+  });
 }

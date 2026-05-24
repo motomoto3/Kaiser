@@ -695,6 +695,38 @@ function createServer() {
         });
       }
 
+      if (method === "GET" && pathname === "/explore") {
+        const qs = new URL(req.url, "http://localhost").searchParams;
+        const slug = (qs.get("slug") || "").trim();
+        const interval = ["1d","1w","1m","max"].includes(qs.get("interval")) ? qs.get("interval") : "max";
+        const fidelity = Math.min(500, Math.max(50, parseInt(qs.get("fidelity") || "200", 10)));
+        if (!slug) return sendJson(res, 400, { error: "slug required" });
+        try {
+          const evUrl = `${appConfig.gammaBaseUrl}/events?slug=${encodeURIComponent(slug)}`;
+          const evData = await fetchJsonWithTimeout(evUrl, appConfig.requestTimeoutMs);
+          const ev = Array.isArray(evData) ? evData[0] : evData;
+          if (!ev) return sendJson(res, 404, { error: "Event not found" });
+          const markets = (ev.markets || []).map(m => ({
+            id: m.id,
+            label: String(m.groupItemTitle || m.question || m.id),
+            clobTokenIds: Array.isArray(m.clobTokenIds) ? m.clobTokenIds : [],
+          }));
+          const history = {};
+          await Promise.allSettled(markets.map(async m => {
+            const tokenId = m.clobTokenIds[0];
+            if (!tokenId) return;
+            try {
+              const url = `https://clob.polymarket.com/prices-history?market=${encodeURIComponent(tokenId)}&interval=${interval}&fidelity=${fidelity}`;
+              const data = await fetchJsonWithTimeout(url, appConfig.requestTimeoutMs * 2);
+              history[m.id] = (data.history || []).map(h => ({ t: Number(h.t), p: Number(h.p) }));
+            } catch { history[m.id] = []; }
+          }));
+          return sendJson(res, 200, { event: { title: ev.title, slug: ev.slug, markets }, history });
+        } catch (err) {
+          return sendJson(res, 502, { error: err.message });
+        }
+      }
+
       sendJson(res, 404, { error: "Not found" });
     } catch (err) {
       console.error("[bot] Request error:", err.message || err);
