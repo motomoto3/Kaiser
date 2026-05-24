@@ -1330,8 +1330,19 @@ function buildExploration() {
           </div>
           <button id="exp-go-btn" class="btn-preset">Analyze ▶</button>
         </div>
+        <div class="explore-row explore-scan-row-ctrl">
+          <span class="explore-label">Scan</span>
+          <select id="exp-scan-pattern" class="explore-sel">
+            <option value="all">All patterns</option>
+            <option value="normal">Normal distribution</option>
+            <option value="extremes">Cheap extremes</option>
+          </select>
+          <button id="exp-scan-btn" class="btn-preset">Scan Polymarket</button>
+          <span id="exp-scan-status" class="muted" style="font-size:0.75rem"></span>
+        </div>
       </div>
       <div class="explore-api-note muted">Polymarket CLOB history API is capped at 30 days — older data is not available.</div>
+      <div id="exp-scan-results"></div>
       <div id="exp-status" hidden></div>
       <div id="exp-charts"></div>
     </div>`;
@@ -1348,6 +1359,7 @@ function buildExploration() {
   document.getElementById("exp-slug-txt").addEventListener("keydown", e => {
     if (e.key === "Enter") exploreGo();
   });
+  document.getElementById("exp-scan-btn").addEventListener("click", exploreScan);
 }
 
 const EXPLORE_HISTORY_KEY = "kaiser-explore-history-v1";
@@ -1419,6 +1431,70 @@ async function exploreGo() {
     exploreRender(data);
   } catch (err) {
     status.textContent = "Error: " + err.message;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function exploreGoWithSlug(slug) {
+  document.getElementById("exp-slug-txt").value = slug;
+  document.getElementById("exp-scan-results").innerHTML = "";
+  await exploreGo();
+}
+
+async function exploreScan() {
+  const pattern = document.getElementById("exp-scan-pattern").value;
+  const statusEl = document.getElementById("exp-scan-status");
+  const resultsEl = document.getElementById("exp-scan-results");
+  const btn = document.getElementById("exp-scan-btn");
+  btn.disabled = true;
+  statusEl.textContent = "Scanning…";
+  resultsEl.innerHTML = "";
+  try {
+    const res = await fetch(`/explore/scan?pattern=${encodeURIComponent(pattern)}&minTiers=6&maxPages=8`, { cache: "no-store" });
+    if (!res.ok) { statusEl.textContent = "Scan failed."; return; }
+    const results = await res.json();
+    statusEl.textContent = results.length ? `${results.length} pools found` : "No matching pools found.";
+    if (!results.length) return;
+
+    const rows = results.map(r => {
+      const sumPc = Math.round(r.sumP * 100);
+      const sumCls = r.sumP < 1 ? "bid" : "muted";
+      const badgeCls = r.dist === "normal" ? "scan-badge-normal" : r.dist === "extremes" ? "scan-badge-extremes" : "scan-badge-other";
+      const badgeLabel = r.dist === "normal" ? "bell" : r.dist === "extremes" ? "tails" : "other";
+      const endStr = r.endDate ? exploreFmtShortDate(new Date(r.endDate).getTime() / 1000) : "";
+      const closedBadge = r.closed ? `<span class="explore-win-badge">closed</span>` : "";
+      const maxP = Math.max(...r.prices);
+      const bars = r.prices.map(p => {
+        const h = Math.max(2, Math.round((p / maxP) * 28));
+        const col = p < 0.08 ? "#6e7681" : p === maxP ? "#58a6ff" : "#388bfd66";
+        return `<span style="display:inline-block;width:6px;height:${h}px;background:${col};border-radius:1px;align-self:flex-end"></span>`;
+      }).join("");
+
+      return `<div class="explore-scan-item" data-slug="${escHtml(r.slug)}">
+        <div class="explore-scan-main">
+          <span class="explore-scan-title">${escHtml(r.title)}</span>
+          <span class="explore-scan-pills">
+            <span class="explore-scan-badge ${badgeCls}">${badgeLabel}</span>
+            <span class="explore-scan-tiers">${r.tierCount} tiers</span>
+            <span class="explore-scan-sump ${sumCls}">Σp ${sumPc}¢</span>
+          </span>
+        </div>
+        <div class="explore-scan-sub">
+          <span class="muted" style="font-size:0.7rem;font-family:'IBM Plex Mono',monospace">${escHtml(r.slug)}</span>
+          ${endStr ? `<span class="muted" style="font-size:0.7rem"> · ends ${endStr}</span>` : ""}
+          ${closedBadge}
+          <span class="explore-scan-bars" style="display:inline-flex;gap:2px;margin-left:0.5rem;vertical-align:middle">${bars}</span>
+        </div>
+      </div>`;
+    }).join("");
+
+    resultsEl.innerHTML = `<div class="explore-scan-results">${rows}</div>`;
+    resultsEl.querySelectorAll(".explore-scan-item").forEach(el => {
+      el.addEventListener("click", () => exploreGoWithSlug(el.dataset.slug));
+    });
+  } catch (err) {
+    statusEl.textContent = "Error: " + err.message;
   } finally {
     btn.disabled = false;
   }

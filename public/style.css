@@ -470,6 +470,40 @@ td {
   padding: 1.5rem 1.5rem 3rem;
 }
 
+.explore-scan-results {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 1.25rem;
+  overflow: hidden;
+}
+.explore-scan-item {
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+  cursor: pointer;
+  padding: 0.55rem 0.8rem;
+  transition: background 0.1s;
+}
+.explore-scan-item:last-child { border-bottom: none; }
+.explore-scan-item:hover { background: color-mix(in srgb, var(--accent) 5%, transparent); }
+.explore-scan-main { align-items: baseline; display: flex; flex-wrap: wrap; gap: 0.4rem; justify-content: space-between; }
+.explore-scan-title { font-size: 0.82rem; font-weight: 500; }
+.explore-scan-pills { align-items: center; display: flex; flex-wrap: wrap; gap: 0.35rem; }
+.explore-scan-sub { align-items: center; display: flex; flex-wrap: wrap; gap: 0.3rem; margin-top: 0.15rem; }
+
+.explore-scan-badge {
+  border-radius: 3px;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.65rem;
+  font-weight: 600;
+  padding: 0.1rem 0.35rem;
+  text-transform: uppercase;
+}
+.scan-badge-normal   { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }
+.scan-badge-extremes { background: color-mix(in srgb, #f0883e 18%, transparent); color: #f0883e; }
+.scan-badge-other    { background: color-mix(in srgb, var(--muted) 18%, transparent); color: var(--muted); }
+
+.explore-scan-tiers { color: var(--muted); font-family: "IBM Plex Mono", monospace; font-size: 0.7rem; }
+.explore-scan-sump  { font-family: "IBM Plex Mono", monospace; font-size: 0.75rem; font-weight: 600; }
+
 .explore-controls {
   background: var(--surface);
   border: 1px solid var(--border);
