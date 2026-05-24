@@ -1448,10 +1448,10 @@ async function exploreScan() {
   const resultsEl = document.getElementById("exp-scan-results");
   const btn = document.getElementById("exp-scan-btn");
   btn.disabled = true;
-  statusEl.innerHTML = `<span class="scan-spinner"></span> Scanning 1200 events…`;
+  statusEl.innerHTML = `<span class="scan-spinner"></span> Scanning 4000 events…`;
   resultsEl.innerHTML = "";
   try {
-    const res = await fetch(`/explore/scan?pattern=${encodeURIComponent(pattern)}&minTiers=5&maxPages=12`, { cache: "no-store" });
+    const res = await fetch(`/explore/scan?pattern=${encodeURIComponent(pattern)}&minTiers=5&maxPages=40`, { cache: "no-store" });
     if (!res.ok) { statusEl.textContent = "Scan failed."; return; }
     const results = await res.json();
     statusEl.textContent = results.length ? `${results.length} pools found` : "No matching pools found.";
@@ -1464,6 +1464,7 @@ async function exploreScan() {
       const badgeLabel = r.dist === "normal" ? "bell" : r.dist === "extremes" ? "tails" : "other";
       const endStr = r.endDate ? exploreFmtShortDate(new Date(r.endDate).getTime() / 1000) : "";
       const closedBadge = r.closed ? `<span class="explore-win-badge">closed</span>` : "";
+      const trackedBadge = r.tracked ? `<span class="explore-win-badge" style="background:color-mix(in srgb,var(--accent) 20%,transparent);color:var(--accent)">tracked</span>` : "";
       const maxP = Math.max(...r.prices);
       const bars = r.prices.map(p => {
         const h = Math.max(2, Math.round((p / maxP) * 28));
@@ -1483,7 +1484,7 @@ async function exploreScan() {
         <div class="explore-scan-sub">
           <span class="muted" style="font-size:0.7rem;font-family:'IBM Plex Mono',monospace">${escHtml(r.slug)}</span>
           ${endStr ? `<span class="muted" style="font-size:0.7rem"> · ends ${endStr}</span>` : ""}
-          ${closedBadge}
+          ${trackedBadge}${closedBadge}
           <span class="explore-scan-bars" style="display:inline-flex;gap:2px;margin-left:0.5rem;vertical-align:middle">${bars}</span>
         </div>
       </div>`;
