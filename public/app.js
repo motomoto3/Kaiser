@@ -1350,13 +1350,38 @@ function buildExploration() {
   });
 }
 
+const EXPLORE_HISTORY_KEY = "kaiser-explore-history-v1";
+
+function exploreHistoryLoad() {
+  try { return JSON.parse(localStorage.getItem(EXPLORE_HISTORY_KEY) || "[]"); } catch { return []; }
+}
+
+function exploreHistorySave(slug, title) {
+  const hist = exploreHistoryLoad().filter(h => h.slug !== slug);
+  hist.unshift({ slug, title: title || slug });
+  try { localStorage.setItem(EXPLORE_HISTORY_KEY, JSON.stringify(hist.slice(0, 30))); } catch {}
+}
+
 function exploreRefreshSlugs() {
   const sel = document.getElementById("exp-slug-sel");
   if (!sel) return;
   const prev = sel.value;
-  const slugs = window._lastData?.slugs || [];
-  sel.innerHTML = `<option value="">— tracked events —</option>` +
-    slugs.map(s => `<option value="${escHtml(s)}">${escHtml(s)}</option>`).join("");
+
+  const tracked = window._lastData?.slugs || [];
+  const history = exploreHistoryLoad();
+  const trackedSet = new Set(tracked);
+
+  let html = `<option value="">— select event —</option>`;
+  if (tracked.length) {
+    html += `<optgroup label="Tracked">${tracked.map(s =>
+      `<option value="${escHtml(s)}">${escHtml(s)}</option>`).join("")}</optgroup>`;
+  }
+  const recent = history.filter(h => !trackedSet.has(h.slug));
+  if (recent.length) {
+    html += `<optgroup label="Recent">${recent.map(h =>
+      `<option value="${escHtml(h.slug)}">${escHtml(h.title)}</option>`).join("")}</optgroup>`;
+  }
+  sel.innerHTML = html;
   if (prev) sel.value = prev;
 }
 
@@ -1386,6 +1411,10 @@ async function exploreGo() {
       return;
     }
     const data = await res.json();
+    exploreHistorySave(data.event.slug, data.event.title || data.event.slug);
+    exploreRefreshSlugs();
+    document.getElementById("exp-slug-sel").value = data.event.slug;
+    document.getElementById("exp-slug-txt").value = "";
     status.hidden = true;
     exploreRender(data);
   } catch (err) {
