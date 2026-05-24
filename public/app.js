@@ -1454,39 +1454,29 @@ function exploreAlignSeries(history, markets, n) {
 }
 
 function exploreComputeReturns(aligned, markets) {
+  // Proportional allocation: D_i = total × p_i / Σp_j
+  // → return = Σp_exit / Σp_entry − 1  (same regardless of which tier wins)
   const { times, prices } = aligned;
   const n = times.length;
+  const ids = markets.map(m => m.id);
 
-  // Build weights from current calc rows for matching markets, or equal weight
-  const included = markets.filter(m => {
-    const r = calc.rows.find(r => r.id === m.id);
-    return !r || r.included !== false;
-  });
-  let totalW = 0;
-  const rawW = {};
-  included.forEach(m => {
-    const r = calc.rows.find(r => r.id === m.id);
-    const w = r ? Math.max(0.01, r.factor) : 1;
-    rawW[m.id] = w;
-    totalW += w;
-  });
-  if (totalW === 0) { included.forEach(m => { rawW[m.id] = 1; totalW += 1; }); }
-  const weights = {};
-  included.forEach(m => { weights[m.id] = rawW[m.id] / totalW; });
-
-  const finalPx = {};
-  included.forEach(m => { finalPx[m.id] = prices[m.id]?.[n - 1] ?? null; });
+  // Sum of prices at last data point (exit)
+  let sumExit = 0;
+  for (const id of ids) {
+    const p = prices[id]?.[n - 1];
+    if (!p || p <= 0) return []; // missing exit price, skip whole chart
+    sumExit += p;
+  }
 
   const series = [];
   for (let te = 0; te < n - 1; te++) {
-    let ret = 0, valid = true;
-    included.forEach(m => {
-      const pE = prices[m.id]?.[te];
-      const pX = finalPx[m.id];
-      if (!pE || !pX || pE <= 0) { valid = false; return; }
-      ret += weights[m.id] * (pX / pE - 1);
-    });
-    if (valid) series.push({ t: times[te], pct: ret * 100 });
+    let sumEntry = 0, valid = true;
+    for (const id of ids) {
+      const p = prices[id]?.[te];
+      if (!p || p <= 0) { valid = false; break; }
+      sumEntry += p;
+    }
+    if (valid) series.push({ t: times[te], pct: (sumExit / sumEntry - 1) * 100 });
   }
   return series;
 }
@@ -1667,30 +1657,27 @@ function exploreRender(data) {
   const returnSvg = exploreBuildReturnChart(aligned.tMin, aligned.tMax, returnSeries, optT);
 
   // Summary
-  const weights = calc.rows.some(r => markets.find(m => m.id === r.id)) ? "current calculator weights" : "equal weights";
   const summHtml = `
     <div class="explore-summary">
       <div class="explore-summary-row">
         <span class="explore-summ-label">Best entry</span>
         <span class="explore-summ-val">${optIdx >= 0 ? exploreFmtDateFull(returnSeries[optIdx].t) : "—"}</span>
         <span class="explore-summ-pct bid">${optIdx >= 0 ? (optRet >= 0 ? "+" : "") + optRet.toFixed(1) + "%" : "—"}</span>
-        ${calc.total && optIdx >= 0 ? `<span class="explore-summ-eur">(${fmtEur(calc.total * optRet / 100)})</span>` : ""}
       </div>
       <div class="explore-summary-row">
         <span class="explore-summ-label">Worst entry</span>
         <span class="explore-summ-val">${worstIdx >= 0 ? exploreFmtDateFull(returnSeries[worstIdx].t) : "—"}</span>
         <span class="explore-summ-pct ${worstRet < 0 ? "ask" : "bid"}">${worstIdx >= 0 ? (worstRet >= 0 ? "+" : "") + worstRet.toFixed(1) + "%" : "—"}</span>
-        ${calc.total && worstIdx >= 0 ? `<span class="explore-summ-eur">(${fmtEur(calc.total * worstRet / 100)})</span>` : ""}
       </div>
       <div class="explore-summary-row" style="font-size:0.73rem;color:var(--muted);margin-top:0.1rem">
-        Exit basis: last available data point · Allocation: ${escHtml(weights)}
+        Proportional allocation · exit = last data point · profit guaranteed on any winner when Σp &lt; 1
       </div>
     </div>`;
 
   charts.innerHTML = `<h3 class="explore-event-title">${escHtml(event.title || event.slug)}</h3>`;
   charts.appendChild(priceSvg);
   charts.appendChild(legend);
-  charts.insertAdjacentHTML("beforeend", `<div class="explore-return-label">Return % if entered at T (exit = last data point)</div>`);
+  charts.insertAdjacentHTML("beforeend", `<div class="explore-return-label">Profit % if entered at T with proportional allocation (exit = last data point · any winner)</div>`);
   charts.appendChild(returnSvg);
   charts.insertAdjacentHTML("beforeend", summHtml);
 
