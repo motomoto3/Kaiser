@@ -722,7 +722,7 @@ td {
 
 .explore-table {
   border-collapse: collapse;
-  font-size: 0.8rem;
+  font-size: 0.76rem;
   min-width: 500px;
   width: 100%;
 }
@@ -731,9 +731,9 @@ td {
   border-bottom: 1px solid var(--border);
   color: var(--muted);
   font-family: "IBM Plex Mono", monospace;
-  font-size: 0.72rem;
+  font-size: 0.7rem;
   font-weight: 500;
-  padding: 0.4rem 0.6rem;
+  padding: 0.28rem 0.4rem;
   text-align: left;
   white-space: nowrap;
 }
@@ -742,7 +742,7 @@ td {
 .explore-table td {
   border-bottom: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
   font-family: "IBM Plex Mono", monospace;
-  padding: 0.45rem 0.6rem;
+  padding: 0.28rem 0.4rem;
   vertical-align: top;
 }
 
@@ -752,7 +752,8 @@ tr.sc-best td { background: color-mix(in srgb, var(--accent) 6%, transparent); }
 tr.sc-best .sc-label { color: var(--accent); font-weight: 600; }
 tr.sc-excluded td { opacity: 0.4; }
 
-.sc-tier-label { white-space: nowrap; }
+.sc-tier-label { white-space: nowrap; max-width: 170px; }
+.sc-tier-name { display: inline-block; max-width: 130px; overflow: hidden; text-overflow: ellipsis; vertical-align: middle; white-space: nowrap; }
 
 .sc-col-best { background: color-mix(in srgb, var(--accent) 5%, transparent); }
 .sc-summary-row td { border-top: 1px solid var(--border); }

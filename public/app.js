@@ -1440,7 +1440,7 @@ function exploreAlignSeries(history, markets, n) {
     const h = (history[m.id] || []).slice().sort((a, b) => a.t - b.t);
     prices[m.id] = times.map(t => {
       if (!h.length) return null;
-      if (t <= h[0].t) return h[0].p;
+      if (t < h[0].t) return null;  // before market existed — don't fabricate price
       if (t >= h[h.length - 1].t) return h[h.length - 1].p;
       let lo = 0, hi = h.length - 1;
       while (lo + 1 < hi) {
@@ -1492,6 +1492,10 @@ function exploreFmtDateFull(t) {
   const d = new Date(t * 1000);
   return d.toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" }) +
     " " + d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+function exploreFmtShortDate(t) {
+  return new Date(t * 1000).toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
 function exploreMakeSVG(W, H, content) {
@@ -1953,9 +1957,10 @@ function exploreRenderScenarioTable(container, aligned, markets) {
   const thead = `<tr>
     <th>Tier</th>
     ${scenarios.map((sc, ci) => {
-      const dateStr = sc.result ? exploreFmtDateFull(sc.t) : "—";
+      const shortLabel = sc.key === "best" ? "Best" : sc.key.toUpperCase();
+      const dateStr = sc.result ? exploreFmtShortDate(sc.t) : "—";
       const noteStr = sc.note ? `<br><span class="sc-note">${escHtml(sc.note)}</span>` : "";
-      return `<th class="${ci === 0 ? "sc-col-best" : ""}" title="${escHtml(sc.label)}">${escHtml(sc.label)}${noteStr}<br><span class="sc-date">${dateStr}</span></th>`;
+      return `<th class="${ci === 0 ? "sc-col-best" : ""}" title="${escHtml(sc.label)}">${shortLabel}${noteStr}<br><span class="sc-date">${dateStr}</span></th>`;
     }).join("")}
   </tr>`;
 
@@ -1976,10 +1981,10 @@ function exploreRenderScenarioTable(container, aligned, markets) {
     }).join("");
     return `<tr class="${isSelected ? "" : "sc-excluded"}">
       <td class="sc-tier-label">
-        <label class="explore-tier-cb">
+        <label class="explore-tier-cb" title="${escHtml(m.label)}">
           <input type="checkbox" data-mid="${escHtml(m.id)}" ${isSelected ? "checked" : ""}>
           <span class="explore-legend-dot" style="background:${color}"></span>
-          ${escHtml(m.label)}${m.won ? `<span class="explore-win-badge" style="margin-left:3px">✓</span>` : ""}
+          <span class="sc-tier-name">${escHtml(m.label)}${m.won ? `<span class="explore-win-badge" style="margin-left:3px">✓</span>` : ""}</span>
         </label>
       </td>
       ${cells}
@@ -1988,36 +1993,36 @@ function exploreRenderScenarioTable(container, aligned, markets) {
 
   // Σ prices row — shows the arb condition
   const sumRow = `<tr class="sc-summary-row">
-    <td class="sc-summ-label">Σ prices</td>
+    <td class="sc-summ-label">Σp</td>
     ${scenarios.map((sc, ci) => {
       if (!sc.result) return `<td class="num muted">—</td>`;
       const s = sc.result.sumEntry;
       const cls = s < 1 ? "bid" : "ask";
-      return `<td class="num ${cls}${ci === 0 ? " sc-col-best" : ""}">${(s * 100).toFixed(1)}¢</td>`;
+      return `<td class="num ${cls}${ci === 0 ? " sc-col-best" : ""}" title="Sum of entry prices">${(s * 100).toFixed(1)}¢</td>`;
     }).join("")}
   </tr>`;
 
   // Guaranteed profit row (if ANY selected tier wins at resolution)
   const guarRow = `<tr class="sc-summary-row">
-    <td class="sc-summ-label">If any wins</td>
+    <td class="sc-summ-label">Any win</td>
     ${scenarios.map((sc, ci) => {
       if (!sc.result) return `<td class="num muted">—</td>`;
       const { guaranteedPct, guaranteedPnl } = sc.result;
       const cls = guaranteedPnl >= 0 ? "bid" : "ask";
       const sign = guaranteedPnl >= 0 ? "+" : "";
-      return `<td class="num ${cls} sc-ret${ci === 0 ? " sc-col-best" : ""}" title="Profit if held to resolution">${sign}${guaranteedPct.toFixed(1)}% (${sign}$${Math.abs(guaranteedPnl).toFixed(2)})</td>`;
+      return `<td class="num ${cls} sc-ret${ci === 0 ? " sc-col-best" : ""}" title="Profit if held to resolution">${sign}${guaranteedPct.toFixed(1)}%<br><span class="sc-alloc">${sign}$${Math.abs(guaranteedPnl).toFixed(2)}</span></td>`;
     }).join("")}
   </tr>`;
 
   // Mid-market value at last data point
   const midRow = `<tr class="sc-summary-row">
-    <td class="sc-summ-label">At last price</td>
+    <td class="sc-summ-label">Last px</td>
     ${scenarios.map((sc, ci) => {
       if (!sc.result) return `<td class="num muted">—</td>`;
       const { midPct, midPnl } = sc.result;
       const cls = midPnl >= 0 ? "bid" : "ask";
       const sign = midPnl >= 0 ? "+" : "";
-      return `<td class="num ${cls} sc-pnl${ci === 0 ? " sc-col-best" : ""}" title="Mid-market portfolio value at last data point">${sign}${midPct.toFixed(1)}% (${sign}$${Math.abs(midPnl).toFixed(2)})</td>`;
+      return `<td class="num ${cls} sc-pnl${ci === 0 ? " sc-col-best" : ""}" title="Mid-market portfolio value at last data point">${sign}${midPct.toFixed(1)}%<br><span class="sc-alloc">${sign}$${Math.abs(midPnl).toFixed(2)}</span></td>`;
     }).join("")}
   </tr>`;
 
