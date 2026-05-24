@@ -1768,28 +1768,61 @@ function exploreFindNDaysBefore(times, daysBack) {
 }
 
 function exploreScenarioReturn(aligned, selectedIds, entryIdx, total) {
+  // Proportional allocation: D_i = total × p_i / Σp_j
+  // → any winner pays the same: D_i / p_i = total / Σp_j
+  // → guaranteed profit = total × (1 - Σp_j) / Σp_j  (positive when Σp_j < 1)
   const { prices } = aligned;
   const n = aligned.times.length;
   if (!selectedIds.length || entryIdx >= n - 1) return null;
-  const perTier = total / selectedIds.length;
-  let exitValue = 0;
-  const tierPrices = {};
+
+  const tierPrices = {}, allocation = {};
+  let sumEntry = 0;
   for (const id of selectedIds) {
-    const pE = prices[id]?.[entryIdx];
-    const pX = prices[id]?.[n - 1];
-    if (!pE || !pX || pE <= 0) return null;
-    tierPrices[id] = pE;
-    exitValue += (perTier / pE) * pX;
+    const p = prices[id]?.[entryIdx];
+    if (!p || p <= 0) return null;
+    tierPrices[id] = p;
+    sumEntry += p;
   }
-  return { exitValue, pnl: exitValue - total, pct: (exitValue / total - 1) * 100, tierPrices };
+  for (const id of selectedIds) {
+    allocation[id] = total * tierPrices[id] / sumEntry;
+  }
+
+  // Guaranteed payout at resolution (any selected tier wins)
+  const payout = total / sumEntry;
+  const guaranteedPnl = payout - total;
+  const guaranteedPct = (payout / total - 1) * 100;
+
+  // Mid-market portfolio value at last data point
+  // = (total / sumEntry) × Σp_i_exit  (same multiplier for all tiers)
+  let sumExit = 0;
+  for (const id of selectedIds) {
+    const pX = prices[id]?.[n - 1];
+    if (pX == null) return null;
+    sumExit += pX;
+  }
+  const midValue = (total / sumEntry) * sumExit;
+  const midPnl   = midValue - total;
+  const midPct   = (midValue / total - 1) * 100;
+
+  return { sumEntry, allocation, tierPrices,
+           guaranteedPnl, guaranteedPct,
+           midPnl, midPct,
+           pnl: guaranteedPnl, pct: guaranteedPct }; // pnl/pct = guaranteed for best-entry search
 }
 
 function exploreBestEntryIdx(aligned, selectedIds, total) {
-  const n = aligned.times.length;
-  let bestIdx = 0, bestPnl = -Infinity;
+  // Best entry = lowest Σp_i at entry (maximises guaranteed profit = total×(1-Σp)/Σp)
+  const { prices, times } = aligned;
+  const n = times.length;
+  let bestIdx = 0, lowestSum = Infinity;
   for (let te = 0; te < n - 1; te++) {
-    const r = exploreScenarioReturn(aligned, selectedIds, te, total);
-    if (r && r.pnl > bestPnl) { bestPnl = r.pnl; bestIdx = te; }
+    let sum = 0, valid = true;
+    for (const id of selectedIds) {
+      const p = prices[id]?.[te];
+      if (!p || p <= 0) { valid = false; break; }
+      sum += p;
+    }
+    if (valid && sum < lowestSum) { lowestSum = sum; bestIdx = te; }
   }
   return bestIdx;
 }
@@ -1863,7 +1896,7 @@ function exploreRenderScenarioTable(container, aligned, markets) {
     }).join("")}
   </tr>`;
 
-  // One row per market (all markets, not just selected — checkbox controls inclusion)
+  // One row per market — shows entry price + allocation amount per scenario
   const tierRows = markets.map(m => {
     const gi = markets.indexOf(m);
     const color = EXPLORE_COLORS[gi % EXPLORE_COLORS.length];
@@ -1872,9 +1905,11 @@ function exploreRenderScenarioTable(container, aligned, markets) {
       if (!isSelected || !sc.result) return `<td class="num muted">—</td>`;
       const p = sc.result.tierPrices[m.id];
       if (p === undefined) return `<td class="num muted">—</td>`;
-      const shares = p > 0 ? (perTier / p).toFixed(1) : "—";
-      const tip = `$${perTier.toFixed(0)} → ${shares} shares @ ${fmt(p)}`;
-      return `<td class="num${ci === 0 ? " sc-col-best" : ""}" title="${escHtml(tip)}">${fmt(p)}</td>`;
+      const inv = sc.result.allocation[m.id];
+      const shares = p > 0 ? (inv / p).toFixed(1) : "—";
+      const tip = `$${inv.toFixed(2)} invested → ${shares} shares @ ${fmt(p)}`;
+      return `<td class="num${ci === 0 ? " sc-col-best" : ""}" title="${escHtml(tip)}">
+        ${fmt(p)}<br><span class="sc-alloc">$${inv.toFixed(2)}</span></td>`;
     }).join("");
     return `<tr class="${isSelected ? "" : "sc-excluded"}">
       <td class="sc-tier-label">
@@ -1888,25 +1923,38 @@ function exploreRenderScenarioTable(container, aligned, markets) {
     </tr>`;
   }).join("");
 
-  // Return row
-  const retRow = `<tr class="sc-summary-row">
-    <td class="sc-summ-label">Return</td>
+  // Σ prices row — shows the arb condition
+  const sumRow = `<tr class="sc-summary-row">
+    <td class="sc-summ-label">Σ prices</td>
     ${scenarios.map((sc, ci) => {
       if (!sc.result) return `<td class="num muted">—</td>`;
-      const { pct } = sc.result;
-      const cls = pct >= 0 ? "bid" : "ask";
-      return `<td class="num ${cls} sc-ret${ci === 0 ? " sc-col-best" : ""}">${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%</td>`;
+      const s = sc.result.sumEntry;
+      const cls = s < 1 ? "bid" : "ask";
+      return `<td class="num ${cls}${ci === 0 ? " sc-col-best" : ""}">${(s * 100).toFixed(1)}¢</td>`;
     }).join("")}
   </tr>`;
 
-  // P&L row
-  const pnlRow = `<tr class="sc-summary-row">
-    <td class="sc-summ-label">P&amp;L</td>
+  // Guaranteed profit row (if ANY selected tier wins at resolution)
+  const guarRow = `<tr class="sc-summary-row">
+    <td class="sc-summ-label">If any wins</td>
     ${scenarios.map((sc, ci) => {
       if (!sc.result) return `<td class="num muted">—</td>`;
-      const { pnl } = sc.result;
-      const cls = pnl >= 0 ? "bid" : "ask";
-      return `<td class="num ${cls} sc-pnl${ci === 0 ? " sc-col-best" : ""}">${pnl >= 0 ? "+" : ""}$${Math.abs(pnl).toFixed(2)}</td>`;
+      const { guaranteedPct, guaranteedPnl } = sc.result;
+      const cls = guaranteedPnl >= 0 ? "bid" : "ask";
+      const sign = guaranteedPnl >= 0 ? "+" : "";
+      return `<td class="num ${cls} sc-ret${ci === 0 ? " sc-col-best" : ""}" title="Profit if held to resolution">${sign}${guaranteedPct.toFixed(1)}% (${sign}$${Math.abs(guaranteedPnl).toFixed(2)})</td>`;
+    }).join("")}
+  </tr>`;
+
+  // Mid-market value at last data point
+  const midRow = `<tr class="sc-summary-row">
+    <td class="sc-summ-label">At last price</td>
+    ${scenarios.map((sc, ci) => {
+      if (!sc.result) return `<td class="num muted">—</td>`;
+      const { midPct, midPnl } = sc.result;
+      const cls = midPnl >= 0 ? "bid" : "ask";
+      const sign = midPnl >= 0 ? "+" : "";
+      return `<td class="num ${cls} sc-pnl${ci === 0 ? " sc-col-best" : ""}" title="Mid-market portfolio value at last data point">${sign}${midPct.toFixed(1)}% (${sign}$${Math.abs(midPnl).toFixed(2)})</td>`;
     }).join("")}
   </tr>`;
 
@@ -1914,9 +1962,9 @@ function exploreRenderScenarioTable(container, aligned, markets) {
     <div class="explore-table-scroll">
       <table class="explore-table">
         <thead>${thead}</thead>
-        <tbody>${tierRows}${retRow}${pnlRow}</tbody>
+        <tbody>${tierRows}${sumRow}${guarRow}${midRow}</tbody>
       </table>
     </div>
-    <p class="sc-foot muted">Hover price cell for share count · exit = last available price</p>`;
+    <p class="sc-foot muted">D<sub>i</sub> = $total × p<sub>i</sub> / Σp — equal payout on any winner · hover price for shares</p>`;
 }
 

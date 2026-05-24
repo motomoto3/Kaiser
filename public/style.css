@@ -761,6 +761,7 @@ tr.sc-excluded td { opacity: 0.4; }
 .sc-label { display: block; }
 .sc-date { color: var(--muted); font-size: 0.68rem; }
 .sc-note { color: var(--muted); font-size: 0.68rem; margin-left: 0.4rem; }
+.sc-alloc { color: var(--muted); font-size: 0.68rem; }
 .sc-ret { font-weight: 600; }
 .sc-pnl { font-weight: 600; }
 
