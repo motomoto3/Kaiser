@@ -750,6 +750,13 @@ td {
 
 tr.sc-best td { background: color-mix(in srgb, var(--accent) 6%, transparent); }
 tr.sc-best .sc-label { color: var(--accent); font-weight: 600; }
+tr.sc-excluded td { opacity: 0.4; }
+
+.sc-tier-label { white-space: nowrap; }
+
+.sc-col-best { background: color-mix(in srgb, var(--accent) 5%, transparent); }
+.sc-summary-row td { border-top: 1px solid var(--border); }
+.sc-summ-label { color: var(--muted); font-family: "IBM Plex Mono", monospace; font-size: 0.72rem; font-weight: 500; }
 
 .sc-label { display: block; }
 .sc-date { color: var(--muted); font-size: 0.68rem; }

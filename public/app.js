@@ -1805,28 +1805,18 @@ function exploreBuildScenarioSection(aligned, markets) {
       <span class="explore-section-sub">Total investment: $<input id="exp-total" class="exp-total-input" type="number" min="1" value="100"> · equal split across selected tiers</span>
     </div>`;
 
-  // Tier checkboxes
-  const cbRow = document.createElement("div");
-  cbRow.className = "explore-tier-select";
-  markets.forEach((m, i) => {
-    const color = EXPLORE_COLORS[i % EXPLORE_COLORS.length];
-    const lbl = document.createElement("label");
-    lbl.className = "explore-tier-cb";
-    lbl.innerHTML = `<input type="checkbox" value="${escHtml(m.id)}" checked>
-      <span class="explore-legend-dot" style="background:${color};flex-shrink:0"></span>
-      ${escHtml(m.label)}${m.won ? `<span class="explore-win-badge" style="margin-left:3px">✓</span>` : ""}`;
-    lbl.querySelector("input").addEventListener("change", e => {
-      if (e.target.checked) exploreSelectedIds.add(m.id);
-      else exploreSelectedIds.delete(m.id);
-      exploreRenderScenarioTable(tableDiv, aligned, markets);
-    });
-    cbRow.appendChild(lbl);
-  });
-  section.appendChild(cbRow);
-
   const tableDiv = document.createElement("div");
   section.appendChild(tableDiv);
   exploreRenderScenarioTable(tableDiv, aligned, markets);
+
+  // Delegated listener — survives table re-renders
+  tableDiv.addEventListener("change", e => {
+    const cb = e.target.closest("input[type='checkbox'][data-mid]");
+    if (!cb) return;
+    if (cb.checked) exploreSelectedIds.add(cb.dataset.mid);
+    else exploreSelectedIds.delete(cb.dataset.mid);
+    exploreRenderScenarioTable(tableDiv, aligned, markets);
+  });
 
   section.querySelector("#exp-total").addEventListener("change", () =>
     exploreRenderScenarioTable(tableDiv, aligned, markets));
@@ -1847,63 +1837,86 @@ function exploreRenderScenarioTable(container, aligned, markets) {
 
   const selMarkets = selectedIds.map(id => markets.find(m => m.id === id)).filter(Boolean);
   const bestIdx = exploreBestEntryIdx(aligned, selectedIds, total);
+  const perTier = total / selectedIds.length;
 
-  // Build scenario rows
-  const rows = EXPLORE_SCENARIOS.map(sc => {
+  // Resolve each scenario to an index + result
+  const scenarios = EXPLORE_SCENARIOS.map(sc => {
     let idx, note = "";
     if (sc.daysBack === null) {
       idx = bestIdx;
     } else {
       const target = times[n - 1] - sc.daysBack * 86400;
       idx = exploreFindNDaysBefore(times, sc.daysBack);
-      if (target < times[0]) note = "oldest available";
+      if (target < times[0]) note = "oldest avail.";
     }
-    const r = exploreScenarioReturn(aligned, selectedIds, idx, total);
-    return { ...sc, idx, t: times[idx], result: r, note };
+    return { ...sc, idx, t: times[idx], note,
+             result: exploreScenarioReturn(aligned, selectedIds, idx, total) };
   });
 
-  // Column headers
-  const thTiers = selMarkets.map((m, i) => {
+  // Header row: scenario columns
+  const thead = `<tr>
+    <th>Tier</th>
+    ${scenarios.map((sc, ci) => {
+      const dateStr = sc.result ? exploreFmtDateFull(sc.t) : "—";
+      const noteStr = sc.note ? `<br><span class="sc-note">${escHtml(sc.note)}</span>` : "";
+      return `<th class="${ci === 0 ? "sc-col-best" : ""}" title="${escHtml(sc.label)}">${escHtml(sc.label)}${noteStr}<br><span class="sc-date">${dateStr}</span></th>`;
+    }).join("")}
+  </tr>`;
+
+  // One row per market (all markets, not just selected — checkbox controls inclusion)
+  const tierRows = markets.map(m => {
     const gi = markets.indexOf(m);
     const color = EXPLORE_COLORS[gi % EXPLORE_COLORS.length];
-    const lbl = m.label.length > 13 ? m.label.slice(0, 11) + "…" : m.label;
-    return `<th style="color:${color}" title="${escHtml(m.label)}">${escHtml(lbl)}</th>`;
-  }).join("");
-
-  // Rows
-  const perTier = total / selectedIds.length;
-  const tbody = rows.map((sc, ri) => {
-    if (!sc.result) {
-      return `<tr${ri === 0 ? ' class="sc-best"' : ""}><td><b>${escHtml(sc.label)}</b></td>
-        <td colspan="${selMarkets.length + 2}" class="muted" style="font-size:0.75rem">not enough history</td></tr>`;
-    }
-    const { pct, pnl, tierPrices } = sc.result;
-    const cls = pct >= 0 ? "bid" : "ask";
-    const sign = pct >= 0 ? "+" : "";
-    const priceCells = selMarkets.map(m => {
-      const p = tierPrices[m.id];
+    const isSelected = exploreSelectedIds.has(m.id);
+    const cells = scenarios.map((sc, ci) => {
+      if (!isSelected || !sc.result) return `<td class="num muted">—</td>`;
+      const p = sc.result.tierPrices[m.id];
+      if (p === undefined) return `<td class="num muted">—</td>`;
       const shares = p > 0 ? (perTier / p).toFixed(1) : "—";
-      return `<td class="num" title="$${(perTier).toFixed(0)} buys ${shares} shares @ ${p !== undefined ? fmt(p) : "—"}">${p !== undefined ? fmt(p) : "—"}</td>`;
+      const tip = `$${perTier.toFixed(0)} → ${shares} shares @ ${fmt(p)}`;
+      return `<td class="num${ci === 0 ? " sc-col-best" : ""}" title="${escHtml(tip)}">${fmt(p)}</td>`;
     }).join("");
-    const noteHtml = sc.note ? `<span class="sc-note">${escHtml(sc.note)}</span>` : "";
-    const dateHtml = `<span class="sc-date">${exploreFmtDateFull(sc.t)}</span>`;
-    return `<tr${ri === 0 ? ' class="sc-best"' : ""}>
-      <td><span class="sc-label">${escHtml(sc.label)}</span>${noteHtml}<br>${dateHtml}</td>
-      ${priceCells}
-      <td class="num ${cls} sc-ret">${sign}${pct.toFixed(1)}%</td>
-      <td class="num ${cls} sc-pnl">${sign}$${Math.abs(pnl).toFixed(2)}</td>
+    return `<tr class="${isSelected ? "" : "sc-excluded"}">
+      <td class="sc-tier-label">
+        <label class="explore-tier-cb">
+          <input type="checkbox" data-mid="${escHtml(m.id)}" ${isSelected ? "checked" : ""}>
+          <span class="explore-legend-dot" style="background:${color}"></span>
+          ${escHtml(m.label)}${m.won ? `<span class="explore-win-badge" style="margin-left:3px">✓</span>` : ""}
+        </label>
+      </td>
+      ${cells}
     </tr>`;
   }).join("");
+
+  // Return row
+  const retRow = `<tr class="sc-summary-row">
+    <td class="sc-summ-label">Return</td>
+    ${scenarios.map((sc, ci) => {
+      if (!sc.result) return `<td class="num muted">—</td>`;
+      const { pct } = sc.result;
+      const cls = pct >= 0 ? "bid" : "ask";
+      return `<td class="num ${cls} sc-ret${ci === 0 ? " sc-col-best" : ""}">${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%</td>`;
+    }).join("")}
+  </tr>`;
+
+  // P&L row
+  const pnlRow = `<tr class="sc-summary-row">
+    <td class="sc-summ-label">P&amp;L</td>
+    ${scenarios.map((sc, ci) => {
+      if (!sc.result) return `<td class="num muted">—</td>`;
+      const { pnl } = sc.result;
+      const cls = pnl >= 0 ? "bid" : "ask";
+      return `<td class="num ${cls} sc-pnl${ci === 0 ? " sc-col-best" : ""}">${pnl >= 0 ? "+" : ""}$${Math.abs(pnl).toFixed(2)}</td>`;
+    }).join("")}
+  </tr>`;
 
   container.innerHTML = `
     <div class="explore-table-scroll">
       <table class="explore-table">
-        <thead><tr>
-          <th>Entry</th>${thTiers}
-          <th>Return</th><th>P&amp;L</th>
-        </tr></thead>
-        <tbody>${tbody}</tbody>
+        <thead>${thead}</thead>
+        <tbody>${tierRows}${retRow}${pnlRow}</tbody>
       </table>
     </div>
-    <p class="sc-foot muted">Hover price cell for share count · exit = last available price</p>`;}
+    <p class="sc-foot muted">Hover price cell for share count · exit = last available price</p>`;
+}
 
