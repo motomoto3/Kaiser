@@ -1814,16 +1814,21 @@ let exploreSelectedIds = new Set();
 let exploreCurrentAligned = null;
 let exploreCurrentMarkets = null;
 
-const EXPLORE_SCENARIOS = [
-  { key: "best", label: "Best entry",       daysBack: null },
-  { key: "30d",  label: "30D before close", daysBack: 30  },
-  { key: "25d",  label: "25D before close", daysBack: 25  },
-  { key: "20d",  label: "20D before close", daysBack: 20  },
-  { key: "15d",  label: "15D before close", daysBack: 15  },
-  { key: "10d",  label: "10D before close", daysBack: 10  },
-  { key: "5d",   label: "5D before close",  daysBack: 5   },
-  { key: "1d",   label: "1D before close",  daysBack: 1   },
-];
+function exploreBuildScenarioDays(times) {
+  // Returns fixed-interval daysBack columns (no Best) suited to the data range
+  const dataRangeDays = (times[times.length - 1] - times[0]) / 86400;
+  const capDays = Math.min(30, Math.floor(dataRangeDays));
+  const list = [];
+  if (capDays >= 5) {
+    for (let d = Math.floor(capDays / 5) * 5; d >= 5; d -= 5)
+      list.push({ key: `${d}d`, label: `${d}D before close`, daysBack: d });
+  } else {
+    for (let d = capDays; d >= 2; d--)
+      list.push({ key: `${d}d`, label: `${d}D before close`, daysBack: d });
+  }
+  if (dataRangeDays >= 1) list.push({ key: "1d", label: "1D before close", daysBack: 1 });
+  return list;
+}
 
 function exploreFindNDaysBefore(times, daysBack) {
   const target = times[times.length - 1] - daysBack * 86400;
@@ -1946,49 +1951,53 @@ function exploreRenderScenarioTable(container, aligned, markets) {
     return;
   }
 
-  const selMarkets = selectedIds.map(id => markets.find(m => m.id === id)).filter(Boolean);
   const bestIdx = exploreBestEntryIdx(aligned, selectedIds, total);
-  const perTier = total / selectedIds.length;
+  const bestDaysBack = (times[n - 1] - times[bestIdx]) / 86400;
 
-  // Resolve each scenario to an index + result
-  const scenarios = EXPLORE_SCENARIOS.map(sc => {
-    let idx, note = "";
-    if (sc.daysBack === null) {
-      idx = bestIdx;
-    } else {
-      const target = times[n - 1] - sc.daysBack * 86400;
-      idx = exploreFindNDaysBefore(times, sc.daysBack);
-      if (target < times[0]) note = "oldest avail.";
-    }
-    return { ...sc, idx, t: times[idx], note,
+  // Build scenario list: fixed intervals + Best inserted at its chronological position
+  const dayScenarios = exploreBuildScenarioDays(times).map(sc => {
+    const target = times[n - 1] - sc.daysBack * 86400;
+    const idx = exploreFindNDaysBefore(times, sc.daysBack);
+    const note = target < times[0] ? "oldest avail." : "";
+    return { ...sc, isBest: false, idx, t: times[idx], note,
              result: exploreScenarioReturn(aligned, selectedIds, idx, total) };
   });
+  const bestScenario = {
+    key: "best", label: "Best entry", daysBack: bestDaysBack, isBest: true,
+    idx: bestIdx, t: times[bestIdx], note: "",
+    result: exploreScenarioReturn(aligned, selectedIds, bestIdx, total),
+  };
+  // Sort all scenarios by daysBack descending (chronological: earliest entry first)
+  const scenarios = [...dayScenarios, bestScenario]
+    .sort((a, b) => b.daysBack - a.daysBack);
 
-  // Header row: scenario columns
+  const scCell = (sc, extra, content) =>
+    `<td class="num${sc.isBest ? " sc-col-best" : ""}${extra ? " " + extra : ""}">${content}</td>`;
+
+  // Header row
   const thead = `<tr>
     <th>Tier</th>
-    ${scenarios.map((sc, ci) => {
-      const shortLabel = sc.key === "best" ? "Best" : sc.key.toUpperCase();
+    ${scenarios.map(sc => {
+      const shortLabel = sc.isBest ? "Best" : sc.key.toUpperCase();
       const dateStr = sc.result ? exploreFmtShortDate(sc.t) : "—";
       const noteStr = sc.note ? `<br><span class="sc-note">${escHtml(sc.note)}</span>` : "";
-      return `<th class="${ci === 0 ? "sc-col-best" : ""}" title="${escHtml(sc.label)}">${shortLabel}${noteStr}<br><span class="sc-date">${dateStr}</span></th>`;
+      return `<th class="${sc.isBest ? "sc-col-best" : ""}" title="${escHtml(sc.label)}">${shortLabel}${noteStr}<br><span class="sc-date">${dateStr}</span></th>`;
     }).join("")}
   </tr>`;
 
-  // One row per market — shows entry price + allocation amount per scenario
+  // One row per market
   const tierRows = markets.map(m => {
     const gi = markets.indexOf(m);
     const color = EXPLORE_COLORS[gi % EXPLORE_COLORS.length];
     const isSelected = exploreSelectedIds.has(m.id);
-    const cells = scenarios.map((sc, ci) => {
-      if (!isSelected || !sc.result) return `<td class="num muted">—</td>`;
+    const cells = scenarios.map(sc => {
+      if (!isSelected || !sc.result) return `<td class="num muted${sc.isBest ? " sc-col-best" : ""}">—</td>`;
       const p = sc.result.tierPrices[m.id];
-      if (p === undefined) return `<td class="num muted">—</td>`;
+      if (p === undefined) return `<td class="num muted${sc.isBest ? " sc-col-best" : ""}">—</td>`;
       const inv = sc.result.allocation[m.id];
       const shares = p > 0 ? (inv / p).toFixed(1) : "—";
       const tip = `$${inv.toFixed(2)} invested → ${shares} shares @ ${fmt(p)}`;
-      return `<td class="num${ci === 0 ? " sc-col-best" : ""}" title="${escHtml(tip)}">
-        ${fmt(p)}<br><span class="sc-alloc">$${inv.toFixed(2)}</span></td>`;
+      return scCell(sc, "", `<span title="${escHtml(tip)}">${fmt(p)}<br><span class="sc-alloc">$${inv.toFixed(2)}</span></span>`);
     }).join("");
     return `<tr class="${isSelected ? "" : "sc-excluded"}">
       <td class="sc-tier-label">
@@ -2002,38 +2011,37 @@ function exploreRenderScenarioTable(container, aligned, markets) {
     </tr>`;
   }).join("");
 
-  // Σ prices row — shows the arb condition
+  // Σ prices row
   const sumRow = `<tr class="sc-summary-row">
     <td class="sc-summ-label">Σp</td>
-    ${scenarios.map((sc, ci) => {
-      if (!sc.result) return `<td class="num muted">—</td>`;
+    ${scenarios.map(sc => {
+      if (!sc.result) return `<td class="num muted${sc.isBest ? " sc-col-best" : ""}">—</td>`;
       const s = sc.result.sumEntry;
-      const cls = s < 1 ? "bid" : "ask";
-      return `<td class="num ${cls}${ci === 0 ? " sc-col-best" : ""}" title="Sum of entry prices">${(s * 100).toFixed(1)}¢</td>`;
+      return scCell(sc, s < 1 ? "bid" : "ask", `${(s * 100).toFixed(1)}¢`);
     }).join("")}
   </tr>`;
 
-  // Guaranteed profit row (if ANY selected tier wins at resolution)
+  // Guaranteed profit row
   const guarRow = `<tr class="sc-summary-row">
     <td class="sc-summ-label">Any win</td>
-    ${scenarios.map((sc, ci) => {
-      if (!sc.result) return `<td class="num muted">—</td>`;
+    ${scenarios.map(sc => {
+      if (!sc.result) return `<td class="num muted${sc.isBest ? " sc-col-best" : ""}">—</td>`;
       const { guaranteedPct, guaranteedPnl } = sc.result;
-      const cls = guaranteedPnl >= 0 ? "bid" : "ask";
       const sign = guaranteedPnl >= 0 ? "+" : "";
-      return `<td class="num ${cls} sc-ret${ci === 0 ? " sc-col-best" : ""}" title="Profit if held to resolution">${sign}${guaranteedPct.toFixed(1)}%<br><span class="sc-alloc">${sign}$${Math.abs(guaranteedPnl).toFixed(2)}</span></td>`;
+      return scCell(sc, `sc-ret ${guaranteedPnl >= 0 ? "bid" : "ask"}`,
+        `${sign}${guaranteedPct.toFixed(1)}%<br><span class="sc-alloc">${sign}$${Math.abs(guaranteedPnl).toFixed(2)}</span>`);
     }).join("")}
   </tr>`;
 
   // Mid-market value at last data point
   const midRow = `<tr class="sc-summary-row">
     <td class="sc-summ-label">Last px</td>
-    ${scenarios.map((sc, ci) => {
-      if (!sc.result) return `<td class="num muted">—</td>`;
+    ${scenarios.map(sc => {
+      if (!sc.result) return `<td class="num muted${sc.isBest ? " sc-col-best" : ""}">—</td>`;
       const { midPct, midPnl } = sc.result;
-      const cls = midPnl >= 0 ? "bid" : "ask";
       const sign = midPnl >= 0 ? "+" : "";
-      return `<td class="num ${cls} sc-pnl${ci === 0 ? " sc-col-best" : ""}" title="Mid-market portfolio value at last data point">${sign}${midPct.toFixed(1)}%<br><span class="sc-alloc">${sign}$${Math.abs(midPnl).toFixed(2)}</span></td>`;
+      return scCell(sc, `sc-pnl ${midPnl >= 0 ? "bid" : "ask"}`,
+        `${sign}${midPct.toFixed(1)}%<br><span class="sc-alloc">${sign}$${Math.abs(midPnl).toFixed(2)}</span>`);
     }).join("")}
   </tr>`;
 
