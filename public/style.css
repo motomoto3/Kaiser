@@ -570,6 +570,12 @@ td {
   width: 9px;
 }
 
+.explore-api-note {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.71rem;
+  margin-bottom: 1rem;
+}
+
 .explore-legend-winner { font-weight: 500; color: var(--text); }
 
 .explore-win-badge {

@@ -1326,12 +1326,12 @@ function buildExploration() {
           <div class="exp-range-btns" role="group">
             <button class="exp-range-btn" data-iv="1d">1D</button>
             <button class="exp-range-btn" data-iv="1w">1W</button>
-            <button class="exp-range-btn" data-iv="1m">1M</button>
-            <button class="exp-range-btn active" data-iv="max">Max</button>
+            <button class="exp-range-btn active" data-iv="max">30D</button>
           </div>
           <button id="exp-go-btn" class="btn-preset">Analyze ▶</button>
         </div>
       </div>
+      <div class="explore-api-note muted">Polymarket CLOB history API is capped at 30 days — older data is not available.</div>
       <div id="exp-status" hidden></div>
       <div id="exp-charts"></div>
     </div>`;
