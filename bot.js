@@ -707,7 +707,7 @@ function createServer() {
           if (prices.every(p => Math.abs(p - prices[0]) < 0.005)) return null;
           if (prices.every(p => p < 0.01 || p > 0.99)) return null;
           // At most 1 tier may be above 25¢ — filters out "pick the winner" style markets
-          if (prices.filter(p => p > 0.25).length > 1) return null;
+          if (prices.filter(p => p > 0.40).length > 1) return null;
           const maxP = Math.max(...prices);
           const maxIdx = prices.indexOf(maxP);
           const head = prices[0], tail = prices[n - 1];
