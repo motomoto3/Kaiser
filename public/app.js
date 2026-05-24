@@ -1453,12 +1453,11 @@ function exploreAlignSeries(history, markets, n) {
   return { times, prices, tMin, tMax };
 }
 
-function exploreComputeReturns(aligned, markets) {
+function exploreComputeReturns(aligned, ids) {
   // Proportional allocation: D_i = total × p_i / Σp_j
   // → return = Σp_exit / Σp_entry − 1  (same regardless of which tier wins)
   const { times, prices } = aligned;
   const n = times.length;
-  const ids = markets.map(m => m.id);
 
   // Sum of prices at last data point (exit)
   let sumExit = 0;
@@ -1503,7 +1502,7 @@ function exploreMakeSVG(W, H, content) {
   return svg;
 }
 
-function exploreBuildPriceChart(aligned, markets, optT) {
+function exploreBuildPriceChart(aligned, markets, optT, selectedIds) {
   const { times, prices, tMin, tMax } = aligned;
   const W = 900, H = 270, MT = 18, MB = EXPLORE_MB, ML = EXPLORE_ML, MR = EXPLORE_MR;
   const PW = W - ML - MR, PH = H - MT - MB;
@@ -1527,14 +1526,15 @@ function exploreBuildPriceChart(aligned, markets, optT) {
   // Axes
   s += `<line x1="${ML}" y1="${MT}" x2="${ML}" y2="${MT+PH}" stroke="#30363d" stroke-width="1"/>`;
   s += `<line x1="${ML}" y1="${MT+PH}" x2="${W-MR}" y2="${MT+PH}" stroke="#30363d" stroke-width="1"/>`;
-  // Market lines (winner drawn thicker, losers dimmed when resolved)
+  // Market lines (winner drawn thicker, losers dimmed when resolved, deselected very dim)
   const anyResolved = markets.some(m => m.resolved);
   markets.forEach((m, i) => {
     const ps = prices[m.id];
     if (!ps) return;
+    const isSelected = !selectedIds || selectedIds.has(m.id);
     const color = EXPLORE_COLORS[i % EXPLORE_COLORS.length];
     const width = m.won ? 2.5 : 1.8;
-    const opacity = anyResolved && !m.won ? 0.35 : 1;
+    const opacity = !isSelected ? 0.12 : (anyResolved && !m.won ? 0.35 : 1);
     const pts = times.map((t, j) => ps[j] !== null ? `${xS(t).toFixed(1)},${yS(ps[j]).toFixed(1)}` : null)
       .filter(Boolean).join(" ");
     if (pts) s += `<polyline points="${pts}" fill="none" stroke="${color}" stroke-width="${width}" stroke-linejoin="round" stroke-linecap="round" opacity="${opacity}"/>`;
@@ -1620,6 +1620,60 @@ function exploreBuildReturnChart(tMin, tMax, returnSeries, optT) {
   return svg;
 }
 
+function buildExploreSummary(returnSeries, optIdx, worstIdx) {
+  const optRet  = optIdx  >= 0 ? returnSeries[optIdx].pct  : 0;
+  const worstRet = worstIdx >= 0 ? returnSeries[worstIdx].pct : 0;
+  const el = document.createElement("div");
+  el.id = "explore-summary";
+  el.innerHTML = `
+    <div class="explore-summary">
+      <div class="explore-summary-row">
+        <span class="explore-summ-label">Best entry</span>
+        <span class="explore-summ-val">${optIdx >= 0 ? exploreFmtDateFull(returnSeries[optIdx].t) : "—"}</span>
+        <span class="explore-summ-pct bid">${optIdx >= 0 ? (optRet >= 0 ? "+" : "") + optRet.toFixed(1) + "%" : "—"}</span>
+      </div>
+      <div class="explore-summary-row">
+        <span class="explore-summ-label">Worst entry</span>
+        <span class="explore-summ-val">${worstIdx >= 0 ? exploreFmtDateFull(returnSeries[worstIdx].t) : "—"}</span>
+        <span class="explore-summ-pct ${worstRet < 0 ? "ask" : "bid"}">${worstIdx >= 0 ? (worstRet >= 0 ? "+" : "") + worstRet.toFixed(1) + "%" : "—"}</span>
+      </div>
+      <div class="explore-summary-row" style="font-size:0.73rem;color:var(--muted);margin-top:0.1rem">
+        Proportional allocation · exit = last data point · profit guaranteed on any winner when Σp &lt; 1
+      </div>
+    </div>`;
+  return el;
+}
+
+function exploreRefreshCharts() {
+  const aligned = exploreCurrentAligned, markets = exploreCurrentMarkets;
+  if (!aligned || !markets) return;
+  const selIds = [...exploreSelectedIds].filter(id => markets.find(m => m.id === id));
+  const returnSeries = exploreComputeReturns(aligned, selIds);
+
+  let optIdx = -1, optRet = -Infinity, worstIdx = -1, worstRet = Infinity;
+  returnSeries.forEach((s, i) => {
+    if (s.pct > optRet) { optRet = s.pct; optIdx = i; }
+    if (s.pct < worstRet) { worstRet = s.pct; worstIdx = i; }
+  });
+  const optT = optIdx >= 0 ? returnSeries[optIdx].t : null;
+
+  const newPriceSvg = exploreBuildPriceChart(aligned, markets, optT, new Set(selIds));
+  newPriceSvg.id = "explore-price-chart";
+  document.getElementById("explore-price-chart").replaceWith(newPriceSvg);
+
+  const newReturnSvg = exploreBuildReturnChart(aligned.tMin, aligned.tMax, returnSeries, optT);
+  newReturnSvg.id = "explore-return-chart";
+  document.getElementById("explore-return-chart").replaceWith(newReturnSvg);
+
+  document.getElementById("explore-summary")
+    .replaceWith(buildExploreSummary(returnSeries, optIdx, worstIdx));
+
+  const tableDiv = document.getElementById("explore-scenario-table-div");
+  if (tableDiv) exploreRenderScenarioTable(tableDiv, aligned, markets);
+
+  exploreAddInteraction(newPriceSvg, newReturnSvg, aligned, markets, returnSeries);
+}
+
 function exploreRender(data) {
   const { event, history } = data;
   const charts = document.getElementById("exp-charts");
@@ -1634,7 +1688,12 @@ function exploreRender(data) {
   const aligned = exploreAlignSeries(history, markets, 200);
   if (!aligned) return;
 
-  const returnSeries = exploreComputeReturns(aligned, markets);
+  // Cache for reactive updates when tiers are toggled
+  exploreCurrentAligned = aligned;
+  exploreCurrentMarkets = markets;
+  exploreSelectedIds = new Set(markets.map(m => m.id));
+
+  const returnSeries = exploreComputeReturns(aligned, [...exploreSelectedIds]);
 
   let optIdx = -1, optRet = -Infinity, worstIdx = -1, worstRet = Infinity;
   returnSeries.forEach((s, i) => {
@@ -1652,39 +1711,21 @@ function exploreRender(data) {
       ${escHtml(m.label)}${m.won ? " <span class='explore-win-badge'>✓ resolved</span>" : ""}
     </span>`).join("");
 
-  // Build charts
-  const priceSvg  = exploreBuildPriceChart(aligned, markets, optT);
+  // Build charts with stable IDs for reactive replacement
+  const priceSvg  = exploreBuildPriceChart(aligned, markets, optT, exploreSelectedIds);
+  priceSvg.id = "explore-price-chart";
   const returnSvg = exploreBuildReturnChart(aligned.tMin, aligned.tMax, returnSeries, optT);
-
-  // Summary
-  const summHtml = `
-    <div class="explore-summary">
-      <div class="explore-summary-row">
-        <span class="explore-summ-label">Best entry</span>
-        <span class="explore-summ-val">${optIdx >= 0 ? exploreFmtDateFull(returnSeries[optIdx].t) : "—"}</span>
-        <span class="explore-summ-pct bid">${optIdx >= 0 ? (optRet >= 0 ? "+" : "") + optRet.toFixed(1) + "%" : "—"}</span>
-      </div>
-      <div class="explore-summary-row">
-        <span class="explore-summ-label">Worst entry</span>
-        <span class="explore-summ-val">${worstIdx >= 0 ? exploreFmtDateFull(returnSeries[worstIdx].t) : "—"}</span>
-        <span class="explore-summ-pct ${worstRet < 0 ? "ask" : "bid"}">${worstIdx >= 0 ? (worstRet >= 0 ? "+" : "") + worstRet.toFixed(1) + "%" : "—"}</span>
-      </div>
-      <div class="explore-summary-row" style="font-size:0.73rem;color:var(--muted);margin-top:0.1rem">
-        Proportional allocation · exit = last data point · profit guaranteed on any winner when Σp &lt; 1
-      </div>
-    </div>`;
+  returnSvg.id = "explore-return-chart";
 
   charts.innerHTML = `<h3 class="explore-event-title">${escHtml(event.title || event.slug)}</h3>`;
   charts.appendChild(priceSvg);
   charts.appendChild(legend);
   charts.insertAdjacentHTML("beforeend", `<div class="explore-return-label">Profit % if entered at T with proportional allocation (exit = last data point · any winner)</div>`);
   charts.appendChild(returnSvg);
-  charts.insertAdjacentHTML("beforeend", summHtml);
+  charts.appendChild(buildExploreSummary(returnSeries, optIdx, worstIdx));
 
   exploreAddInteraction(priceSvg, returnSvg, aligned, markets, returnSeries);
 
-  // Scenario table — init selection to all markets, then build
-  exploreSelectedIds = new Set(markets.map(m => m.id));
   charts.appendChild(exploreBuildScenarioSection(aligned, markets));
 }
 
@@ -1766,6 +1807,8 @@ function exploreAddInteraction(priceSvg, returnSvg, aligned, markets, returnSeri
 // ── Scenario Table ──────────────────────────────────────────────────────────
 
 let exploreSelectedIds = new Set();
+let exploreCurrentAligned = null;
+let exploreCurrentMarkets = null;
 
 const EXPLORE_SCENARIOS = [
   { key: "best", label: "Best entry",     daysBack: null },
@@ -1855,16 +1898,17 @@ function exploreBuildScenarioSection(aligned, markets) {
     </div>`;
 
   const tableDiv = document.createElement("div");
+  tableDiv.id = "explore-scenario-table-div";
   section.appendChild(tableDiv);
   exploreRenderScenarioTable(tableDiv, aligned, markets);
 
-  // Delegated listener — survives table re-renders
+  // Delegated listener — survives table re-renders; refreshes all charts too
   tableDiv.addEventListener("change", e => {
     const cb = e.target.closest("input[type='checkbox'][data-mid]");
     if (!cb) return;
     if (cb.checked) exploreSelectedIds.add(cb.dataset.mid);
     else exploreSelectedIds.delete(cb.dataset.mid);
-    exploreRenderScenarioTable(tableDiv, aligned, markets);
+    exploreRefreshCharts();
   });
 
   section.querySelector("#exp-total").addEventListener("change", () =>
