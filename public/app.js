@@ -1666,6 +1666,10 @@ function exploreRender(data) {
   charts.insertAdjacentHTML("beforeend", summHtml);
 
   exploreAddInteraction(priceSvg, returnSvg, aligned, markets, returnSeries);
+
+  // Scenario table — init selection to all markets, then build
+  exploreSelectedIds = new Set(markets.map(m => m.id));
+  charts.appendChild(exploreBuildScenarioSection(aligned, markets));
 }
 
 function exploreAddInteraction(priceSvg, returnSvg, aligned, markets, returnSeries) {
@@ -1742,3 +1746,164 @@ function exploreAddInteraction(priceSvg, returnSvg, aligned, markets, returnSeri
     svg.addEventListener("mouseleave", onLeave);
   });
 }
+
+// ── Scenario Table ──────────────────────────────────────────────────────────
+
+let exploreSelectedIds = new Set();
+
+const EXPLORE_SCENARIOS = [
+  { key: "best", label: "Best entry",     daysBack: null },
+  { key: "27d",  label: "27D before close", daysBack: 27 },
+  { key: "9d",   label: "9D before close",  daysBack: 9  },
+  { key: "3d",   label: "3D before close",  daysBack: 3  },
+  { key: "1d",   label: "1D before close",  daysBack: 1  },
+];
+
+function exploreFindNDaysBefore(times, daysBack) {
+  const target = times[times.length - 1] - daysBack * 86400;
+  if (target <= times[0]) return 0;
+  let best = 0, bestD = Infinity;
+  times.forEach((t, i) => { const d = Math.abs(t - target); if (d < bestD) { bestD = d; best = i; } });
+  return best;
+}
+
+function exploreScenarioReturn(aligned, selectedIds, entryIdx, total) {
+  const { prices } = aligned;
+  const n = aligned.times.length;
+  if (!selectedIds.length || entryIdx >= n - 1) return null;
+  const perTier = total / selectedIds.length;
+  let exitValue = 0;
+  const tierPrices = {};
+  for (const id of selectedIds) {
+    const pE = prices[id]?.[entryIdx];
+    const pX = prices[id]?.[n - 1];
+    if (!pE || !pX || pE <= 0) return null;
+    tierPrices[id] = pE;
+    exitValue += (perTier / pE) * pX;
+  }
+  return { exitValue, pnl: exitValue - total, pct: (exitValue / total - 1) * 100, tierPrices };
+}
+
+function exploreBestEntryIdx(aligned, selectedIds, total) {
+  const n = aligned.times.length;
+  let bestIdx = 0, bestPnl = -Infinity;
+  for (let te = 0; te < n - 1; te++) {
+    const r = exploreScenarioReturn(aligned, selectedIds, te, total);
+    if (r && r.pnl > bestPnl) { bestPnl = r.pnl; bestIdx = te; }
+  }
+  return bestIdx;
+}
+
+function exploreBuildScenarioSection(aligned, markets) {
+  const section = document.createElement("div");
+  section.className = "explore-scenario";
+
+  // Header with investment input
+  section.innerHTML = `
+    <div class="explore-scenario-hdr">
+      <span class="explore-section-title">Entry Scenarios</span>
+      <span class="explore-section-sub">Total investment: $<input id="exp-total" class="exp-total-input" type="number" min="1" value="100"> · equal split across selected tiers</span>
+    </div>`;
+
+  // Tier checkboxes
+  const cbRow = document.createElement("div");
+  cbRow.className = "explore-tier-select";
+  markets.forEach((m, i) => {
+    const color = EXPLORE_COLORS[i % EXPLORE_COLORS.length];
+    const lbl = document.createElement("label");
+    lbl.className = "explore-tier-cb";
+    lbl.innerHTML = `<input type="checkbox" value="${escHtml(m.id)}" checked>
+      <span class="explore-legend-dot" style="background:${color};flex-shrink:0"></span>
+      ${escHtml(m.label)}${m.won ? `<span class="explore-win-badge" style="margin-left:3px">✓</span>` : ""}`;
+    lbl.querySelector("input").addEventListener("change", e => {
+      if (e.target.checked) exploreSelectedIds.add(m.id);
+      else exploreSelectedIds.delete(m.id);
+      exploreRenderScenarioTable(tableDiv, aligned, markets);
+    });
+    cbRow.appendChild(lbl);
+  });
+  section.appendChild(cbRow);
+
+  const tableDiv = document.createElement("div");
+  section.appendChild(tableDiv);
+  exploreRenderScenarioTable(tableDiv, aligned, markets);
+
+  section.querySelector("#exp-total").addEventListener("change", () =>
+    exploreRenderScenarioTable(tableDiv, aligned, markets));
+
+  return section;
+}
+
+function exploreRenderScenarioTable(container, aligned, markets) {
+  const { times } = aligned;
+  const n = times.length;
+  const selectedIds = [...exploreSelectedIds].filter(id => markets.find(m => m.id === id));
+  const total = Math.max(1, parseFloat(document.getElementById("exp-total")?.value || "100") || 100);
+
+  if (!selectedIds.length) {
+    container.innerHTML = `<p class="muted" style="padding:0.6rem 0">Select at least one tier.</p>`;
+    return;
+  }
+
+  const selMarkets = selectedIds.map(id => markets.find(m => m.id === id)).filter(Boolean);
+  const bestIdx = exploreBestEntryIdx(aligned, selectedIds, total);
+
+  // Build scenario rows
+  const rows = EXPLORE_SCENARIOS.map(sc => {
+    let idx, note = "";
+    if (sc.daysBack === null) {
+      idx = bestIdx;
+    } else {
+      const target = times[n - 1] - sc.daysBack * 86400;
+      idx = exploreFindNDaysBefore(times, sc.daysBack);
+      if (target < times[0]) note = "oldest available";
+    }
+    const r = exploreScenarioReturn(aligned, selectedIds, idx, total);
+    return { ...sc, idx, t: times[idx], result: r, note };
+  });
+
+  // Column headers
+  const thTiers = selMarkets.map((m, i) => {
+    const gi = markets.indexOf(m);
+    const color = EXPLORE_COLORS[gi % EXPLORE_COLORS.length];
+    const lbl = m.label.length > 13 ? m.label.slice(0, 11) + "…" : m.label;
+    return `<th style="color:${color}" title="${escHtml(m.label)}">${escHtml(lbl)}</th>`;
+  }).join("");
+
+  // Rows
+  const perTier = total / selectedIds.length;
+  const tbody = rows.map((sc, ri) => {
+    if (!sc.result) {
+      return `<tr${ri === 0 ? ' class="sc-best"' : ""}><td><b>${escHtml(sc.label)}</b></td>
+        <td colspan="${selMarkets.length + 2}" class="muted" style="font-size:0.75rem">not enough history</td></tr>`;
+    }
+    const { pct, pnl, tierPrices } = sc.result;
+    const cls = pct >= 0 ? "bid" : "ask";
+    const sign = pct >= 0 ? "+" : "";
+    const priceCells = selMarkets.map(m => {
+      const p = tierPrices[m.id];
+      const shares = p > 0 ? (perTier / p).toFixed(1) : "—";
+      return `<td class="num" title="$${(perTier).toFixed(0)} buys ${shares} shares @ ${p !== undefined ? fmt(p) : "—"}">${p !== undefined ? fmt(p) : "—"}</td>`;
+    }).join("");
+    const noteHtml = sc.note ? `<span class="sc-note">${escHtml(sc.note)}</span>` : "";
+    const dateHtml = `<span class="sc-date">${exploreFmtDateFull(sc.t)}</span>`;
+    return `<tr${ri === 0 ? ' class="sc-best"' : ""}>
+      <td><span class="sc-label">${escHtml(sc.label)}</span>${noteHtml}<br>${dateHtml}</td>
+      ${priceCells}
+      <td class="num ${cls} sc-ret">${sign}${pct.toFixed(1)}%</td>
+      <td class="num ${cls} sc-pnl">${sign}$${Math.abs(pnl).toFixed(2)}</td>
+    </tr>`;
+  }).join("");
+
+  container.innerHTML = `
+    <div class="explore-table-scroll">
+      <table class="explore-table">
+        <thead><tr>
+          <th>Entry</th>${thTiers}
+          <th>Return</th><th>P&amp;L</th>
+        </tr></thead>
+        <tbody>${tbody}</tbody>
+      </table>
+    </div>
+    <p class="sc-foot muted">Hover price cell for share count · exit = last available price</p>`;}
+
