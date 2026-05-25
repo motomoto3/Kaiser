@@ -1366,15 +1366,29 @@ function buildExploration() {
         </div>
       </div>
       <div class="explore-api-note muted">Polymarket CLOB history API is capped at 30 days — older data is not available.</div>
-      <div id="exp-scan-toolbar" style="display:none;align-items:center;gap:0.5rem;padding:0.5rem 0 0.25rem;border-top:1px solid var(--border)">
-        <span class="muted" id="exp-scan-count" style="font-size:0.8rem;flex:1"></span>
-        <span class="muted" style="font-size:0.8rem">Sort:</span>
-        <select id="exp-scan-sort" class="explore-sel">
-          <option value="arb">Best arb (Σp ↑)</option>
-          <option value="tiers">Most tiers</option>
-          <option value="end">Ending soonest</option>
-          <option value="az">A–Z</option>
-        </select>
+      <div id="exp-scan-toolbar" style="display:none;flex-direction:column;gap:0.35rem;padding:0.5rem 0 0.25rem;border-top:1px solid var(--border)">
+        <div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap">
+          <span class="muted" id="exp-scan-count" style="font-size:0.8rem;flex:1"></span>
+          <span class="muted" style="font-size:0.8rem">Sort:</span>
+          <select id="exp-scan-sort" class="explore-sel">
+            <option value="arb">Best arb (Σp ↑)</option>
+            <option value="tiers">Most tiers</option>
+            <option value="end">Ending soonest</option>
+            <option value="az">A–Z</option>
+          </select>
+        </div>
+        <div style="display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap;font-size:0.78rem">
+          <span class="muted">Filter:</span>
+          <label style="display:flex;align-items:center;gap:0.3rem;cursor:pointer;user-select:none">
+            <input type="checkbox" id="exp-filter-resolved" checked> Hide resolved
+          </label>
+          <label style="display:flex;align-items:center;gap:0.3rem;cursor:pointer;user-select:none">
+            <input type="checkbox" id="exp-filter-none"> Has "other" option
+          </label>
+          <select id="exp-filter-cat" class="explore-sel" style="font-size:0.78rem">
+            <option value="all">All categories</option>
+          </select>
+        </div>
       </div>
       <div id="exp-scan-results"></div>
       <div id="exp-status" hidden></div>
@@ -1397,6 +1411,18 @@ function buildExploration() {
   document.getElementById("exp-scan-sort").addEventListener("change", () => {
     if (exploreScanData.length) exploreScanRender(exploreScanData);
   });
+  document.getElementById("exp-filter-resolved").addEventListener("change", e => {
+    exploreScanFilters.hideResolved = e.target.checked;
+    if (exploreScanData.length) exploreScanRender(exploreScanData);
+  });
+  document.getElementById("exp-filter-none").addEventListener("change", e => {
+    exploreScanFilters.onlyNone = e.target.checked;
+    if (exploreScanData.length) exploreScanRender(exploreScanData);
+  });
+  document.getElementById("exp-filter-cat").addEventListener("change", e => {
+    exploreScanFilters.category = e.target.value;
+    if (exploreScanData.length) exploreScanRender(exploreScanData);
+  });
 
   // Restore last scan from localStorage (replaceState so this isn't a back-nav target itself)
   try {
@@ -1404,6 +1430,8 @@ function buildExploration() {
     if (Array.isArray(saved) && saved.length) {
       exploreScanData = saved;
       document.getElementById("exp-scan-status").textContent = "last scan";
+      const resolvedChk = document.getElementById("exp-filter-resolved");
+      if (resolvedChk) resolvedChk.checked = exploreScanFilters.hideResolved;
       _explorerNavigating = true;
       try { exploreScanRender(exploreScanData); } finally { _explorerNavigating = false; }
       history.replaceState({ kaiser: { tab: "explore", view: "scan", sort: "arb", pattern: "all" } }, "");
@@ -1516,7 +1544,26 @@ function exploreScanRender(results) {
   if (!_explorerNavigating) {
     history.pushState({ kaiser: { tab: "explore", view: "scan", sort, pattern } }, "");
   }
-  const sorted = [...results].sort((a, b) => {
+
+  // Populate category dropdown with categories present in the full dataset
+  const catEl = document.getElementById("exp-filter-cat");
+  if (catEl && catEl.options.length <= 1) {
+    const cats = [...new Set(results.map(r => scanCategory(r.tags || [], r.title)))].sort();
+    cats.forEach(c => {
+      const o = document.createElement("option"); o.value = c; o.textContent = c;
+      catEl.appendChild(o);
+    });
+    catEl.value = exploreScanFilters.category;
+  }
+
+  // Apply filters
+  let filtered = results;
+  if (exploreScanFilters.hideResolved) filtered = filtered.filter(r => !r.closed);
+  if (exploreScanFilters.onlyNone) filtered = filtered.filter(r => r.hasNone);
+  if (exploreScanFilters.category !== "all")
+    filtered = filtered.filter(r => scanCategory(r.tags || [], r.title) === exploreScanFilters.category);
+
+  const sorted = [...filtered].sort((a, b) => {
     if (sort === "tiers") return b.tierCount - a.tierCount;
     if (sort === "end") {
       const ta = a.endDate ? new Date(a.endDate).getTime() : Infinity;
@@ -1563,7 +1610,10 @@ function exploreScanRender(results) {
   const toolbar = document.getElementById("exp-scan-toolbar");
   const countEl = document.getElementById("exp-scan-count");
   if (toolbar) toolbar.style.display = "flex";
-  if (countEl) countEl.textContent = `${results.length} pools`;
+  const countTxt = filtered.length === results.length
+    ? `${results.length} pools`
+    : `${filtered.length} of ${results.length} pools`;
+  if (countEl) countEl.textContent = countTxt;
 
   const resultsEl = document.getElementById("exp-scan-results");
   resultsEl.innerHTML = `<div class="explore-scan-results">${rows}</div>`;
@@ -1988,6 +2038,19 @@ let exploreCurrentAligned = null;
 let exploreCurrentMarkets = null;
 let exploreScanData = [];
 let _explorerNavigating = false;
+const exploreScanFilters = { hideResolved: true, category: "all", onlyNone: false };
+
+function scanCategory(tags = [], title = "") {
+  const s = [...tags, title].join(" ").toLowerCase();
+  if (/esport|valorant|\blol\b|league of legends|\bcs\b|dota|overwatch|\bgames?\b/.test(s)) return "Esports";
+  if (/\bsports?\b|soccer|nba|nfl|mlb|mls|nhl|\bf1\b|tennis|wimbledon|cricket|golf|masters|world cup|\bchampion|\bleague\b/.test(s)) return "Sports";
+  if (/\bcrypto\b|bitcoin|\bbtc\b|ethereum|\beth\b|\bxrp\b|solana|\bsol\b|token|defi/.test(s)) return "Crypto";
+  if (/\bpolitic|\belection|\bvote\b|\bpresident|\bprimer ministr|geopolit|\bparliament|\bsenator|\bgovernor/.test(s)) return "Politics";
+  if (/weather|temperature|rainfall|precipitation/.test(s)) return "Weather";
+  if (/\bipo\b|market cap|\bstock\b|\bnasdaq\b|\bfinance\b/.test(s)) return "Finance";
+  if (/movie|film|oscar|emmy|grammy|box office|entertainment/.test(s)) return "Entertainment";
+  return "Other";
+}
 
 function exploreBuildScenarioDays(times) {
   // Returns fixed-interval daysBack columns (no Best) suited to the data range

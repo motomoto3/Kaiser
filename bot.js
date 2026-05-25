@@ -724,6 +724,19 @@ function createServer() {
           const dist = classifyDist(prices);
           if (pattern !== "all" && dist !== pattern) return null;
           const sumP = prices.reduce((a, b) => a + b, 0);
+
+          // Tags: skip internal/operational labels
+          const skipTag = /hide|earn \d+%|forceHide|recurring/i;
+          const tags = (ev.tags || [])
+            .filter(t => !skipTag.test(t.label) && !t.forceHide)
+            .map(t => t.label)
+            .slice(0, 6);
+
+          // Detect catch-all / "none of these" style option among market labels
+          const noneRe = /\b(none|field|other|someone else|neither|no \w|n\/a|something else|not listed)\b/i;
+          const allLabels = markets.map(m => String(m.groupItemTitle || m.question || ""));
+          const hasNone = allLabels.some(l => noneRe.test(l));
+
           return {
             title: ev.title || ev.slug,
             slug: ev.slug,
@@ -733,6 +746,8 @@ function createServer() {
             sumP: Math.round(sumP * 1000) / 1000,
             dist,
             prices: prices.map(p => Math.round(p * 1000) / 1000),
+            tags,
+            hasNone,
           };
         }
 
