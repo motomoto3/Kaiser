@@ -697,17 +697,11 @@ function createServer() {
 
       if (method === "GET" && pathname === "/explore/scan") {
         const qs = new URL(req.url, "http://localhost").searchParams;
-        const minTiers = Math.max(3, parseInt(qs.get("minTiers") || "5", 10));
+        const minTiers = Math.max(2, parseInt(qs.get("minTiers") || "5", 10));
         const pattern  = ["all","normal","extremes"].includes(qs.get("pattern")) ? qs.get("pattern") : "all";
-        const maxPages = Math.min(40, Math.max(1, parseInt(qs.get("maxPages") || "40", 10)));
 
         function classifyDist(prices) {
           const n = prices.length;
-          if (n < 3) return null;
-          if (prices.every(p => Math.abs(p - prices[0]) < 0.005)) return null;
-          if (prices.every(p => p < 0.01 || p > 0.99)) return null;
-          // At most 1 tier may be above 25¢ — filters out "pick the winner" style markets
-          if (prices.filter(p => p > 0.40).length > 1) return null;
           const maxP = Math.max(...prices);
           const maxIdx = prices.indexOf(maxP);
           const head = prices[0], tail = prices[n - 1];
@@ -724,8 +718,10 @@ function createServer() {
             return Number(op[0]);
           }).filter(p => p > 0 && p < 1);
           if (prices.length < minTiers) return null;
+          // Skip all-identical (uninitialised) or all-resolved
+          if (prices.every(p => Math.abs(p - prices[0]) < 0.005)) return null;
+          if (prices.every(p => p < 0.01 || p > 0.99)) return null;
           const dist = classifyDist(prices);
-          if (!dist) return null;
           if (pattern !== "all" && dist !== pattern) return null;
           const sumP = prices.reduce((a, b) => a + b, 0);
           return {
@@ -740,17 +736,21 @@ function createServer() {
           };
         }
 
-        // Fetch pages with two sort orders: recent (startDate) + popular (volume)
-        // Half the budget each so we don't double the request count
-        const halfPages = Math.ceil(maxPages / 2);
-        const dateUrls   = Array.from({ length: halfPages }, (_, i) =>
+        // Primary sweep: all active negRisk events (elections, sports, IPO, temperature, crypto)
+        // negRisk=true&closed=false covers ~9400 events = 95 pages
+        const negRiskPages = 95;
+        const negRiskUrls = Array.from({ length: negRiskPages }, (_, i) =>
+          `${appConfig.gammaBaseUrl}/events?limit=100&offset=${i * 100}&negRisk=true&closed=false&order=volume&ascending=false`);
+
+        // Secondary sweep: recent events by date (catches non-negRisk multi-tier markets)
+        const datePages = 30;
+        const dateUrls = Array.from({ length: datePages }, (_, i) =>
           `${appConfig.gammaBaseUrl}/events?limit=100&offset=${i * 100}&order=startDate&ascending=false`);
-        const volumeUrls = Array.from({ length: halfPages }, (_, i) =>
-          `${appConfig.gammaBaseUrl}/events?limit=100&offset=${i * 100}&order=volume&ascending=false`);
+
         const trackedUrls = appConfig.eventSlugs.map(s =>
           `${appConfig.gammaBaseUrl}/events?slug=${encodeURIComponent(s)}`);
 
-        const allPageUrls = [...dateUrls, ...volumeUrls];
+        const allPageUrls = [...negRiskUrls, ...dateUrls];
         const [pageResults, trackedResults] = await Promise.all([
           Promise.allSettled(allPageUrls.map(url => fetchJsonWithTimeout(url, appConfig.requestTimeoutMs * 2))),
           Promise.allSettled(trackedUrls.map(url => fetchJsonWithTimeout(url, appConfig.requestTimeoutMs))),
@@ -768,7 +768,7 @@ function createServer() {
           if (r) { seen.add(ev.slug); results.push({ ...r, tracked: true }); }
         }
 
-        // Paginated sweep (both sort orders, deduplicated)
+        // Paginated sweep (deduplicated)
         for (const page of pageResults) {
           if (page.status !== "fulfilled" || !Array.isArray(page.value)) continue;
           for (const ev of page.value) {
@@ -779,7 +779,7 @@ function createServer() {
         }
 
         results.sort((a, b) => a.sumP - b.sumP);
-        return sendJson(res, 200, results.slice(0, 100));
+        return sendJson(res, 200, results.slice(0, 4000));
       }
 
       if (method === "GET" && pathname === "/explore") {
