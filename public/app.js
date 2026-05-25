@@ -1383,11 +1383,11 @@ function buildExploration() {
           <label style="display:flex;align-items:center;gap:0.3rem;cursor:pointer;user-select:none">
             <input type="checkbox" id="exp-filter-resolved" checked> Hide resolved
           </label>
-          <label style="display:flex;align-items:center;gap:0.3rem;cursor:pointer;user-select:none">
-            <input type="checkbox" id="exp-filter-none"> Has "other" option
+          <label style="display:flex;align-items:center;gap:0.3rem;cursor:pointer;user-select:none" title="Show only markets that have a catch-all tier (Other, Field, No IPO, Any Other Score…)">
+            <input type="checkbox" id="exp-filter-none"> Has catch-all tier
           </label>
-          <label style="display:flex;align-items:center;gap:0.3rem;cursor:pointer;user-select:none">
-            <input type="checkbox" id="exp-filter-excl-arb"> Arb excl. catch-all
+          <label style="display:flex;align-items:center;gap:0.3rem;cursor:pointer;user-select:none" title="Show markets where the catch-all is the ONLY reason Σp ≥ 1 — skip that leg and it becomes an arb">
+            <input type="checkbox" id="exp-filter-excl-arb"> Arb if catch-all skipped
           </label>
           <select id="exp-filter-cat" class="explore-sel" style="font-size:0.78rem">
             <option value="all">All categories</option>
@@ -1448,7 +1448,7 @@ function buildExploration() {
 }
 
 const EXPLORE_HISTORY_KEY = "kaiser-explore-history-v1";
-const EXPLORE_SCAN_KEY = "kaiser-explore-scan-v1";
+const EXPLORE_SCAN_KEY = "kaiser-explore-scan-v2"; // v2: added hasNone/noneLabel/nonePrice
 
 function exploreHistoryLoad() {
   try { return JSON.parse(localStorage.getItem(EXPLORE_HISTORY_KEY) || "[]"); } catch { return []; }
