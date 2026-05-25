@@ -1337,17 +1337,21 @@ function buildExploration() {
             <option value="normal">Normal distribution</option>
             <option value="extremes">Cheap extremes</option>
           </select>
-          <select id="exp-scan-sort" class="explore-sel">
-            <option value="arb">Best arb (Σp ↑)</option>
-            <option value="tiers">Most tiers</option>
-            <option value="end">Ending soonest</option>
-            <option value="az">A–Z</option>
-          </select>
           <button id="exp-scan-btn" class="btn-preset">Scan Polymarket</button>
           <span id="exp-scan-status" class="muted" style="font-size:0.75rem"></span>
         </div>
       </div>
       <div class="explore-api-note muted">Polymarket CLOB history API is capped at 30 days — older data is not available.</div>
+      <div id="exp-scan-toolbar" style="display:none;align-items:center;gap:0.5rem;padding:0.5rem 0 0.25rem;border-top:1px solid var(--border)">
+        <span class="muted" id="exp-scan-count" style="font-size:0.8rem;flex:1"></span>
+        <span class="muted" style="font-size:0.8rem">Sort:</span>
+        <select id="exp-scan-sort" class="explore-sel">
+          <option value="arb">Best arb (Σp ↑)</option>
+          <option value="tiers">Most tiers</option>
+          <option value="end">Ending soonest</option>
+          <option value="az">A–Z</option>
+        </select>
+      </div>
       <div id="exp-scan-results"></div>
       <div id="exp-status" hidden></div>
       <div id="exp-charts"></div>
@@ -1375,8 +1379,7 @@ function buildExploration() {
     const saved = JSON.parse(localStorage.getItem(EXPLORE_SCAN_KEY) || "null");
     if (Array.isArray(saved) && saved.length) {
       exploreScanData = saved;
-      const statusEl = document.getElementById("exp-scan-status");
-      statusEl.textContent = `${saved.length} pools (last scan)`;
+      document.getElementById("exp-scan-status").textContent = "last scan";
       exploreScanRender(exploreScanData);
     }
   } catch {}
@@ -1509,6 +1512,11 @@ function exploreScanRender(results) {
     </div>`;
   }).join("");
 
+  const toolbar = document.getElementById("exp-scan-toolbar");
+  const countEl = document.getElementById("exp-scan-count");
+  if (toolbar) toolbar.style.display = "flex";
+  if (countEl) countEl.textContent = `${results.length} pools`;
+
   const resultsEl = document.getElementById("exp-scan-results");
   resultsEl.innerHTML = `<div class="explore-scan-results">${rows}</div>`;
   resultsEl.querySelectorAll(".explore-scan-item").forEach(el => {
@@ -1520,8 +1528,10 @@ async function exploreScan() {
   const pattern = document.getElementById("exp-scan-pattern").value;
   const statusEl = document.getElementById("exp-scan-status");
   const resultsEl = document.getElementById("exp-scan-results");
+  const toolbar = document.getElementById("exp-scan-toolbar");
   const btn = document.getElementById("exp-scan-btn");
   btn.disabled = true;
+  if (toolbar) toolbar.style.display = "none";
   statusEl.innerHTML = `<span class="scan-spinner"></span> Scanning Polymarket…`;
   resultsEl.innerHTML = "";
   try {
@@ -1529,7 +1539,7 @@ async function exploreScan() {
     if (!res.ok) { statusEl.textContent = "Scan failed."; return; }
     exploreScanData = await res.json();
     try { localStorage.setItem(EXPLORE_SCAN_KEY, JSON.stringify(exploreScanData)); } catch {}
-    statusEl.textContent = exploreScanData.length ? `${exploreScanData.length} pools found` : "No matching pools found.";
+    statusEl.textContent = exploreScanData.length ? "Done." : "No matching pools found.";
     if (!exploreScanData.length) return;
     exploreScanRender(exploreScanData);
   } catch (err) {
