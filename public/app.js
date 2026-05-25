@@ -1372,6 +1372,7 @@ function buildExploration() {
           <span class="muted" style="font-size:0.8rem">Sort:</span>
           <select id="exp-scan-sort" class="explore-sel">
             <option value="arb">Best arb (Σp ↑)</option>
+            <option value="excl">Best excl. arb</option>
             <option value="tiers">Most tiers</option>
             <option value="end">Ending soonest</option>
             <option value="az">A–Z</option>
@@ -1384,6 +1385,9 @@ function buildExploration() {
           </label>
           <label style="display:flex;align-items:center;gap:0.3rem;cursor:pointer;user-select:none">
             <input type="checkbox" id="exp-filter-none"> Has "other" option
+          </label>
+          <label style="display:flex;align-items:center;gap:0.3rem;cursor:pointer;user-select:none">
+            <input type="checkbox" id="exp-filter-excl-arb"> Arb excl. catch-all
           </label>
           <select id="exp-filter-cat" class="explore-sel" style="font-size:0.78rem">
             <option value="all">All categories</option>
@@ -1421,6 +1425,10 @@ function buildExploration() {
   });
   document.getElementById("exp-filter-cat").addEventListener("change", e => {
     exploreScanFilters.category = e.target.value;
+    if (exploreScanData.length) exploreScanRender(exploreScanData);
+  });
+  document.getElementById("exp-filter-excl-arb").addEventListener("change", e => {
+    exploreScanFilters.onlyExclArb = e.target.checked;
     if (exploreScanData.length) exploreScanRender(exploreScanData);
   });
 
@@ -1560,10 +1568,17 @@ function exploreScanRender(results) {
   let filtered = results;
   if (exploreScanFilters.hideResolved) filtered = filtered.filter(r => !r.closed);
   if (exploreScanFilters.onlyNone) filtered = filtered.filter(r => r.hasNone);
+  if (exploreScanFilters.onlyExclArb) filtered = filtered.filter(r =>
+    r.nonePrice != null && (r.sumP - r.nonePrice) < 1.0 && r.sumP >= 1.0);
   if (exploreScanFilters.category !== "all")
     filtered = filtered.filter(r => scanCategory(r.tags || [], r.title) === exploreScanFilters.category);
 
   const sorted = [...filtered].sort((a, b) => {
+    if (sort === "excl") {
+      const ea = a.nonePrice != null ? a.sumP - a.nonePrice : a.sumP;
+      const eb = b.nonePrice != null ? b.sumP - b.nonePrice : b.sumP;
+      return ea - eb;
+    }
     if (sort === "tiers") return b.tierCount - a.tierCount;
     if (sort === "end") {
       const ta = a.endDate ? new Date(a.endDate).getTime() : Infinity;
@@ -1575,6 +1590,8 @@ function exploreScanRender(results) {
   });
 
   const rows = sorted.map(r => {
+    const sumPExcl = r.nonePrice != null ? r.sumP - r.nonePrice : null;
+    const exclIsArb = sumPExcl != null && sumPExcl < 1.0 && r.sumP >= 1.0;
     const sumPc = Math.round(r.sumP * 100);
     const sumCls = r.sumP < 1 ? "bid" : "muted";
     const badgeCls = r.dist === "normal" ? "scan-badge-normal" : r.dist === "extremes" ? "scan-badge-extremes" : "scan-badge-other";
@@ -1601,6 +1618,7 @@ function exploreScanRender(results) {
           <span class="explore-scan-badge ${badgeCls}">${badgeLabel}</span>
           <span class="explore-scan-tiers">${r.tierCount} tiers</span>
           <span class="explore-scan-sump ${sumCls}">Σp ${sumPc}¢</span>
+          ${exclIsArb ? `<span class="bid" style="font-size:0.7rem;font-family:'IBM Plex Mono',monospace">excl ${Math.round(sumPExcl*100)}¢</span>` : ""}
           <span class="muted" style="font-size:0.7rem">${escHtml(catLabel)}</span>
         </span>
       </div>
@@ -2044,7 +2062,7 @@ let exploreCurrentAligned = null;
 let exploreCurrentMarkets = null;
 let exploreScanData = [];
 let _explorerNavigating = false;
-const exploreScanFilters = { hideResolved: true, category: "all", onlyNone: false };
+const exploreScanFilters = { hideResolved: true, category: "all", onlyNone: false, onlyExclArb: false };
 
 function scanCategory(tags = [], title = "") {
   const s = [...tags, title].join(" ").toLowerCase();
