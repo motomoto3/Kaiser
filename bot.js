@@ -732,10 +732,22 @@ function createServer() {
             .map(t => t.label)
             .slice(0, 6);
 
-          // Detect catch-all / "none of these" style option among market labels
+          // Detect catch-all / "none of these" style option — capture the label text and price
           const noneRe = /\b(none|field|other|someone else|neither|no \w|n\/a|something else|not listed)\b/i;
-          const allLabels = markets.map(m => String(m.groupItemTitle || m.question || ""));
-          const hasNone = allLabels.some(l => noneRe.test(l));
+          let hasNone = false, noneLabel = null, nonePrice = null;
+          for (const m of markets) {
+            const lbl = String(m.groupItemTitle || m.question || "");
+            if (!noneRe.test(lbl)) continue;
+            hasNone = true;
+            if (!noneLabel) {
+              noneLabel = lbl;
+              try {
+                const op = parseJsonField(m.outcomePrices, []);
+                const p = Number(op[0]);
+                if (p > 0 && p < 1) nonePrice = Math.round(p * 1000) / 1000;
+              } catch {}
+            }
+          }
 
           return {
             title: ev.title || ev.slug,
@@ -748,6 +760,8 @@ function createServer() {
             prices: prices.map(p => Math.round(p * 1000) / 1000),
             tags,
             hasNone,
+            noneLabel,
+            nonePrice,
           };
         }
 

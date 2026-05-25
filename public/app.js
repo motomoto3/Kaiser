@@ -1589,6 +1589,11 @@ function exploreScanRender(results) {
       return `<span style="display:inline-block;width:6px;height:${h}px;background:${col};border-radius:1px;align-self:flex-end"></span>`;
     }).join("");
 
+    const nonePc = r.nonePrice ? ` @ ${Math.round(r.nonePrice * 100)}¢` : "";
+    const noneChip = r.hasNone && r.noneLabel
+      ? `<span class="scan-badge-none" title="Catch-all option">↳ "${escHtml(r.noneLabel)}"${nonePc}</span>` : "";
+    const catLabel = scanCategory(r.tags || [], r.title);
+
     return `<div class="explore-scan-item" data-slug="${escHtml(r.slug)}">
       <div class="explore-scan-main">
         <span class="explore-scan-title">${escHtml(r.title)}</span>
@@ -1596,12 +1601,13 @@ function exploreScanRender(results) {
           <span class="explore-scan-badge ${badgeCls}">${badgeLabel}</span>
           <span class="explore-scan-tiers">${r.tierCount} tiers</span>
           <span class="explore-scan-sump ${sumCls}">Σp ${sumPc}¢</span>
+          <span class="muted" style="font-size:0.7rem">${escHtml(catLabel)}</span>
         </span>
       </div>
       <div class="explore-scan-sub">
         <span class="muted" style="font-size:0.7rem;font-family:'IBM Plex Mono',monospace">${escHtml(r.slug)}</span>
         ${endStr ? `<span class="muted" style="font-size:0.7rem"> · ends ${endStr}</span>` : ""}
-        ${trackedBadge}${closedBadge}
+        ${trackedBadge}${closedBadge}${noneChip}
         <span class="explore-scan-bars" style="display:inline-flex;gap:2px;margin-left:0.5rem;vertical-align:middle">${bars}</span>
       </div>
     </div>`;

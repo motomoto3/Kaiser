@@ -514,6 +514,7 @@ td {
 .scan-badge-normal   { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }
 .scan-badge-extremes { background: color-mix(in srgb, #f0883e 18%, transparent); color: #f0883e; }
 .scan-badge-other    { background: color-mix(in srgb, var(--muted) 18%, transparent); color: var(--muted); }
+.scan-badge-none     { color: var(--muted); font-size: 0.68rem; font-style: italic; margin-left: 0.25rem; }
 
 .explore-scan-tiers { color: var(--muted); font-family: "IBM Plex Mono", monospace; font-size: 0.7rem; }
 .explore-scan-sump  { font-family: "IBM Plex Mono", monospace; font-size: 0.75rem; font-weight: 600; }
