@@ -1337,6 +1337,12 @@ function buildExploration() {
             <option value="normal">Normal distribution</option>
             <option value="extremes">Cheap extremes</option>
           </select>
+          <select id="exp-scan-sort" class="explore-sel">
+            <option value="arb">Best arb (Σp ↑)</option>
+            <option value="tiers">Most tiers</option>
+            <option value="end">Ending soonest</option>
+            <option value="az">A–Z</option>
+          </select>
           <button id="exp-scan-btn" class="btn-preset">Scan Polymarket</button>
           <span id="exp-scan-status" class="muted" style="font-size:0.75rem"></span>
         </div>
@@ -1360,9 +1366,24 @@ function buildExploration() {
     if (e.key === "Enter") exploreGo();
   });
   document.getElementById("exp-scan-btn").addEventListener("click", exploreScan);
+  document.getElementById("exp-scan-sort").addEventListener("change", () => {
+    if (exploreScanData.length) exploreScanRender(exploreScanData);
+  });
+
+  // Restore last scan from localStorage
+  try {
+    const saved = JSON.parse(localStorage.getItem(EXPLORE_SCAN_KEY) || "null");
+    if (Array.isArray(saved) && saved.length) {
+      exploreScanData = saved;
+      const statusEl = document.getElementById("exp-scan-status");
+      statusEl.textContent = `${saved.length} pools (last scan)`;
+      exploreScanRender(exploreScanData);
+    }
+  } catch {}
 }
 
 const EXPLORE_HISTORY_KEY = "kaiser-explore-history-v1";
+const EXPLORE_SCAN_KEY = "kaiser-explore-scan-v1";
 
 function exploreHistoryLoad() {
   try { return JSON.parse(localStorage.getItem(EXPLORE_HISTORY_KEY) || "[]"); } catch { return []; }
@@ -1442,6 +1463,59 @@ async function exploreGoWithSlug(slug) {
   await exploreGo();
 }
 
+function exploreScanRender(results) {
+  const sort = document.getElementById("exp-scan-sort")?.value || "arb";
+  const sorted = [...results].sort((a, b) => {
+    if (sort === "tiers") return b.tierCount - a.tierCount;
+    if (sort === "end") {
+      const ta = a.endDate ? new Date(a.endDate).getTime() : Infinity;
+      const tb = b.endDate ? new Date(b.endDate).getTime() : Infinity;
+      return ta - tb;
+    }
+    if (sort === "az") return a.title.localeCompare(b.title);
+    return a.sumP - b.sumP; // arb: best first
+  });
+
+  const rows = sorted.map(r => {
+    const sumPc = Math.round(r.sumP * 100);
+    const sumCls = r.sumP < 1 ? "bid" : "muted";
+    const badgeCls = r.dist === "normal" ? "scan-badge-normal" : r.dist === "extremes" ? "scan-badge-extremes" : "scan-badge-other";
+    const badgeLabel = r.dist === "normal" ? "bell" : r.dist === "extremes" ? "tails" : "other";
+    const endStr = r.endDate ? exploreFmtShortDate(new Date(r.endDate).getTime() / 1000) : "";
+    const closedBadge = r.closed ? `<span class="explore-win-badge">closed</span>` : "";
+    const trackedBadge = r.tracked ? `<span class="explore-win-badge" style="background:color-mix(in srgb,var(--accent) 20%,transparent);color:var(--accent)">tracked</span>` : "";
+    const maxP = Math.max(...r.prices);
+    const bars = r.prices.map(p => {
+      const h = Math.max(2, Math.round((p / maxP) * 28));
+      const col = p < 0.08 ? "#6e7681" : p === maxP ? "#58a6ff" : "#388bfd66";
+      return `<span style="display:inline-block;width:6px;height:${h}px;background:${col};border-radius:1px;align-self:flex-end"></span>`;
+    }).join("");
+
+    return `<div class="explore-scan-item" data-slug="${escHtml(r.slug)}">
+      <div class="explore-scan-main">
+        <span class="explore-scan-title">${escHtml(r.title)}</span>
+        <span class="explore-scan-pills">
+          <span class="explore-scan-badge ${badgeCls}">${badgeLabel}</span>
+          <span class="explore-scan-tiers">${r.tierCount} tiers</span>
+          <span class="explore-scan-sump ${sumCls}">Σp ${sumPc}¢</span>
+        </span>
+      </div>
+      <div class="explore-scan-sub">
+        <span class="muted" style="font-size:0.7rem;font-family:'IBM Plex Mono',monospace">${escHtml(r.slug)}</span>
+        ${endStr ? `<span class="muted" style="font-size:0.7rem"> · ends ${endStr}</span>` : ""}
+        ${trackedBadge}${closedBadge}
+        <span class="explore-scan-bars" style="display:inline-flex;gap:2px;margin-left:0.5rem;vertical-align:middle">${bars}</span>
+      </div>
+    </div>`;
+  }).join("");
+
+  const resultsEl = document.getElementById("exp-scan-results");
+  resultsEl.innerHTML = `<div class="explore-scan-results">${rows}</div>`;
+  resultsEl.querySelectorAll(".explore-scan-item").forEach(el => {
+    el.addEventListener("click", () => exploreGoWithSlug(el.dataset.slug));
+  });
+}
+
 async function exploreScan() {
   const pattern = document.getElementById("exp-scan-pattern").value;
   const statusEl = document.getElementById("exp-scan-status");
@@ -1451,49 +1525,13 @@ async function exploreScan() {
   statusEl.innerHTML = `<span class="scan-spinner"></span> Scanning Polymarket…`;
   resultsEl.innerHTML = "";
   try {
-    const res = await fetch(`/explore/scan?pattern=${encodeURIComponent(pattern)}&minTiers=5&maxPages=40`, { cache: "no-store" });
+    const res = await fetch(`/explore/scan?pattern=${encodeURIComponent(pattern)}&minTiers=5`, { cache: "no-store" });
     if (!res.ok) { statusEl.textContent = "Scan failed."; return; }
-    const results = await res.json();
-    statusEl.textContent = results.length ? `${results.length} pools found` : "No matching pools found.";
-    if (!results.length) return;
-
-    const rows = results.map(r => {
-      const sumPc = Math.round(r.sumP * 100);
-      const sumCls = r.sumP < 1 ? "bid" : "muted";
-      const badgeCls = r.dist === "normal" ? "scan-badge-normal" : r.dist === "extremes" ? "scan-badge-extremes" : "scan-badge-other";
-      const badgeLabel = r.dist === "normal" ? "bell" : r.dist === "extremes" ? "tails" : "other";
-      const endStr = r.endDate ? exploreFmtShortDate(new Date(r.endDate).getTime() / 1000) : "";
-      const closedBadge = r.closed ? `<span class="explore-win-badge">closed</span>` : "";
-      const trackedBadge = r.tracked ? `<span class="explore-win-badge" style="background:color-mix(in srgb,var(--accent) 20%,transparent);color:var(--accent)">tracked</span>` : "";
-      const maxP = Math.max(...r.prices);
-      const bars = r.prices.map(p => {
-        const h = Math.max(2, Math.round((p / maxP) * 28));
-        const col = p < 0.08 ? "#6e7681" : p === maxP ? "#58a6ff" : "#388bfd66";
-        return `<span style="display:inline-block;width:6px;height:${h}px;background:${col};border-radius:1px;align-self:flex-end"></span>`;
-      }).join("");
-
-      return `<div class="explore-scan-item" data-slug="${escHtml(r.slug)}">
-        <div class="explore-scan-main">
-          <span class="explore-scan-title">${escHtml(r.title)}</span>
-          <span class="explore-scan-pills">
-            <span class="explore-scan-badge ${badgeCls}">${badgeLabel}</span>
-            <span class="explore-scan-tiers">${r.tierCount} tiers</span>
-            <span class="explore-scan-sump ${sumCls}">Σp ${sumPc}¢</span>
-          </span>
-        </div>
-        <div class="explore-scan-sub">
-          <span class="muted" style="font-size:0.7rem;font-family:'IBM Plex Mono',monospace">${escHtml(r.slug)}</span>
-          ${endStr ? `<span class="muted" style="font-size:0.7rem"> · ends ${endStr}</span>` : ""}
-          ${trackedBadge}${closedBadge}
-          <span class="explore-scan-bars" style="display:inline-flex;gap:2px;margin-left:0.5rem;vertical-align:middle">${bars}</span>
-        </div>
-      </div>`;
-    }).join("");
-
-    resultsEl.innerHTML = `<div class="explore-scan-results">${rows}</div>`;
-    resultsEl.querySelectorAll(".explore-scan-item").forEach(el => {
-      el.addEventListener("click", () => exploreGoWithSlug(el.dataset.slug));
-    });
+    exploreScanData = await res.json();
+    try { localStorage.setItem(EXPLORE_SCAN_KEY, JSON.stringify(exploreScanData)); } catch {}
+    statusEl.textContent = exploreScanData.length ? `${exploreScanData.length} pools found` : "No matching pools found.";
+    if (!exploreScanData.length) return;
+    exploreScanRender(exploreScanData);
   } catch (err) {
     statusEl.textContent = "Error: " + err.message;
   } finally {
@@ -1890,6 +1928,7 @@ function exploreAddInteraction(priceSvg, returnSvg, aligned, markets, returnSeri
 let exploreSelectedIds = new Set();
 let exploreCurrentAligned = null;
 let exploreCurrentMarkets = null;
+let exploreScanData = [];
 
 function exploreBuildScenarioDays(times) {
   // Returns fixed-interval daysBack columns (no Best) suited to the data range
