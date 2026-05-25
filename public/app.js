@@ -1448,7 +1448,7 @@ async function exploreScan() {
   const resultsEl = document.getElementById("exp-scan-results");
   const btn = document.getElementById("exp-scan-btn");
   btn.disabled = true;
-  statusEl.innerHTML = `<span class="scan-spinner"></span> Scanning 4000 events…`;
+  statusEl.innerHTML = `<span class="scan-spinner"></span> Scanning events by date + volume…`;
   resultsEl.innerHTML = "";
   try {
     const res = await fetch(`/explore/scan?pattern=${encodeURIComponent(pattern)}&minTiers=5&maxPages=40`, { cache: "no-store" });

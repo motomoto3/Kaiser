@@ -740,14 +740,19 @@ function createServer() {
           };
         }
 
-        // Fetch all pages in parallel + tracked events (by slug) so they always appear
-        const pageUrls = Array.from({ length: maxPages }, (_, i) =>
+        // Fetch pages with two sort orders: recent (startDate) + popular (volume)
+        // Half the budget each so we don't double the request count
+        const halfPages = Math.ceil(maxPages / 2);
+        const dateUrls   = Array.from({ length: halfPages }, (_, i) =>
           `${appConfig.gammaBaseUrl}/events?limit=100&offset=${i * 100}&order=startDate&ascending=false`);
+        const volumeUrls = Array.from({ length: halfPages }, (_, i) =>
+          `${appConfig.gammaBaseUrl}/events?limit=100&offset=${i * 100}&order=volume&ascending=false`);
         const trackedUrls = appConfig.eventSlugs.map(s =>
           `${appConfig.gammaBaseUrl}/events?slug=${encodeURIComponent(s)}`);
 
+        const allPageUrls = [...dateUrls, ...volumeUrls];
         const [pageResults, trackedResults] = await Promise.all([
-          Promise.allSettled(pageUrls.map(url => fetchJsonWithTimeout(url, appConfig.requestTimeoutMs * 2))),
+          Promise.allSettled(allPageUrls.map(url => fetchJsonWithTimeout(url, appConfig.requestTimeoutMs * 2))),
           Promise.allSettled(trackedUrls.map(url => fetchJsonWithTimeout(url, appConfig.requestTimeoutMs))),
         ]);
 
@@ -763,7 +768,7 @@ function createServer() {
           if (r) { seen.add(ev.slug); results.push({ ...r, tracked: true }); }
         }
 
-        // Paginated sweep
+        // Paginated sweep (both sort orders, deduplicated)
         for (const page of pageResults) {
           if (page.status !== "fulfilled" || !Array.isArray(page.value)) continue;
           for (const ev of page.value) {
@@ -774,7 +779,7 @@ function createServer() {
         }
 
         results.sort((a, b) => a.sumP - b.sumP);
-        return sendJson(res, 200, results.slice(0, 50));
+        return sendJson(res, 200, results.slice(0, 100));
       }
 
       if (method === "GET" && pathname === "/explore") {
