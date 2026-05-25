@@ -570,6 +570,30 @@ function switchTab(name) {
 document.querySelectorAll(".tab-btn").forEach(btn =>
   btn.addEventListener("click", () => switchTab(btn.dataset.tab)));
 
+window.addEventListener("popstate", e => {
+  const s = e.state?.kaiser;
+  if (!s || s.tab !== "explore") return;
+  _explorerNavigating = true;
+  try {
+    if (s.view === "scan") {
+      const sortEl = document.getElementById("exp-scan-sort");
+      if (sortEl) sortEl.value = s.sort || "arb";
+      const charts = document.getElementById("exp-charts");
+      const status = document.getElementById("exp-status");
+      if (charts) charts.innerHTML = "";
+      if (status) status.hidden = true;
+      exploreScanShow();
+    } else if (s.view === "analyze") {
+      const slugTxt = document.getElementById("exp-slug-txt");
+      if (slugTxt) slugTxt.value = s.slug;
+      exploreScanHide();
+      exploreGo();
+    }
+  } finally {
+    _explorerNavigating = false;
+  }
+});
+
 // ── Tier Matrix Calculator ─────────────────────────────────────────────────
 
 const CALC_STORAGE_KEY = "kaiser-calc-v1";
@@ -1374,13 +1398,15 @@ function buildExploration() {
     if (exploreScanData.length) exploreScanRender(exploreScanData);
   });
 
-  // Restore last scan from localStorage
+  // Restore last scan from localStorage (replaceState so this isn't a back-nav target itself)
   try {
     const saved = JSON.parse(localStorage.getItem(EXPLORE_SCAN_KEY) || "null");
     if (Array.isArray(saved) && saved.length) {
       exploreScanData = saved;
       document.getElementById("exp-scan-status").textContent = "last scan";
-      exploreScanRender(exploreScanData);
+      _explorerNavigating = true;
+      try { exploreScanRender(exploreScanData); } finally { _explorerNavigating = false; }
+      history.replaceState({ kaiser: { tab: "explore", view: "scan", sort: "arb", pattern: "all" } }, "");
     }
   } catch {}
 }
@@ -1452,6 +1478,9 @@ async function exploreGo() {
     document.getElementById("exp-slug-sel").value = data.event.slug;
     document.getElementById("exp-slug-txt").value = "";
     status.hidden = true;
+    if (!_explorerNavigating) {
+      history.pushState({ kaiser: { tab: "explore", view: "analyze", slug: data.event.slug } }, "");
+    }
     exploreRender(data);
   } catch (err) {
     status.textContent = "Error: " + err.message;
@@ -1460,14 +1489,33 @@ async function exploreGo() {
   }
 }
 
+function exploreScanHide() {
+  const toolbar = document.getElementById("exp-scan-toolbar");
+  const results = document.getElementById("exp-scan-results");
+  if (toolbar) toolbar.style.display = "none";
+  if (results) results.style.display = "none";
+}
+
+function exploreScanShow() {
+  const toolbar = document.getElementById("exp-scan-toolbar");
+  const results = document.getElementById("exp-scan-results");
+  if (toolbar && exploreScanData.length) toolbar.style.display = "flex";
+  if (results) results.style.display = "";
+  if (exploreScanData.length) exploreScanRender(exploreScanData);
+}
+
 async function exploreGoWithSlug(slug) {
   document.getElementById("exp-slug-txt").value = slug;
-  document.getElementById("exp-scan-results").innerHTML = "";
+  exploreScanHide();
   await exploreGo();
 }
 
 function exploreScanRender(results) {
   const sort = document.getElementById("exp-scan-sort")?.value || "arb";
+  const pattern = document.getElementById("exp-scan-pattern")?.value || "all";
+  if (!_explorerNavigating) {
+    history.pushState({ kaiser: { tab: "explore", view: "scan", sort, pattern } }, "");
+  }
   const sorted = [...results].sort((a, b) => {
     if (sort === "tiers") return b.tierCount - a.tierCount;
     if (sort === "end") {
@@ -1939,6 +1987,7 @@ let exploreSelectedIds = new Set();
 let exploreCurrentAligned = null;
 let exploreCurrentMarkets = null;
 let exploreScanData = [];
+let _explorerNavigating = false;
 
 function exploreBuildScenarioDays(times) {
   // Returns fixed-interval daysBack columns (no Best) suited to the data range
